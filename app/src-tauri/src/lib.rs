@@ -83,7 +83,9 @@ async fn set_button_metric(
     let mut cfg = config::load(&app);
     ensure_button_slot(&mut cfg, button_index);
     cfg.buttons[button_index].metric = metric;
-    config::save(&app, &cfg).map_err(|e| e.to_string())
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    push_now(&app).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -97,7 +99,9 @@ async fn set_budget_config(
         enabled,
         daily_cap_percent,
     };
-    config::save(&app, &cfg).map_err(|e| e.to_string())
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    push_now(&app).await;
+    Ok(())
 }
 
 /// Opens a native file picker, copies the chosen image into the app's
@@ -145,6 +149,7 @@ async fn pick_icon_for_button(
     ensure_button_slot(&mut cfg, button_index);
     cfg.buttons[button_index].icon_path = Some(dest_str.clone());
     config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    push_now(&app).await;
 
     Ok(Some(dest_str))
 }
@@ -152,6 +157,18 @@ async fn pick_icon_for_button(
 fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
     while cfg.buttons.len() <= index {
         cfg.buttons.push(config::ButtonAssignment::default());
+    }
+}
+
+/// Re-pushes the last known usage snapshot to the device immediately,
+/// instead of making the user wait for the next poll tick (up to
+/// `refresh_interval_secs`) to see a settings change take effect. No-op if
+/// no snapshot has been fetched yet.
+async fn push_now(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let snapshot = state.latest_usage.lock().await.clone();
+    if let Some(snapshot) = snapshot {
+        apply_snapshot(app, &snapshot).await;
     }
 }
 
@@ -196,6 +213,18 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
     }
 }
 
+/// Short label shown above the percentage so buttons showing different
+/// metrics are visually distinguishable (hardware testing showed this was
+/// missing — session/weekly looked identical at a glance).
+fn metric_label(metric: config::Metric) -> &'static str {
+    match metric {
+        config::Metric::Session => "5H",
+        config::Metric::Weekly => "7D",
+        config::Metric::Budget => "BUD",
+        config::Metric::None => "",
+    }
+}
+
 async fn push_snapshot_to_device(
     app: &tauri::AppHandle,
     conn: &ConnectedDevice,
@@ -211,13 +240,21 @@ async fn push_snapshot_to_device(
             break;
         }
 
+        let label = metric_label(assignment.metric);
+
+        // Budget assigned but tracking disabled: show a clear "off" state
+        // instead of silently pushing nothing, which just looked broken.
+        if assignment.metric == config::Metric::Budget && !cfg.budget.enabled {
+            let image = render::render_disabled(label, w as u32, h as u32);
+            device::push_image(&conn.device, conn.kind, index as u8, image).await?;
+            continue;
+        }
+
         let entry: Option<usage::LimitEntry> = match assignment.metric {
             config::Metric::Session => session.cloned(),
             config::Metric::Weekly => weekly.cloned(),
-            config::Metric::Budget if cfg.budget.enabled => {
-                Some(budget::compute(app, &cfg.budget, weekly_percent))
-            }
-            config::Metric::Budget | config::Metric::None => None,
+            config::Metric::Budget => Some(budget::compute(app, &cfg.budget, weekly_percent)),
+            config::Metric::None => None,
         };
 
         let Some(entry) = entry else { continue };
@@ -225,12 +262,15 @@ async fn push_snapshot_to_device(
         let image = match &assignment.icon_path {
             Some(path) => render::render_percent_on_background(
                 std::path::Path::new(path),
+                label,
                 entry.percent,
                 &entry.severity,
                 w as u32,
                 h as u32,
             )?,
-            None => render::render_percent(entry.percent, &entry.severity, w as u32, h as u32),
+            None => {
+                render::render_percent(label, entry.percent, &entry.severity, w as u32, h as u32)
+            }
         };
 
         device::push_image(&conn.device, conn.kind, index as u8, image).await?;
