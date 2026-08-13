@@ -436,11 +436,15 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // macOS: clicking the Dock icon while the window is hidden
             // should bring it back, matching normal Mac app behavior.
-            if let tauri::RunEvent::Reopen { .. } = event {
-                show_main_window(app_handle);
+            // RunEvent::Reopen only exists on macOS - this must be cfg'd
+            // out on other platforms or the build doesn't even compile
+            // (found via a real Windows CI failure, not guessed).
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                show_main_window(_app_handle);
             }
         });
 }
