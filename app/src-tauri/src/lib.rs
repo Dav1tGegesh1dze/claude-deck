@@ -11,7 +11,6 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
-use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
 
 struct ConnectedDevice {
@@ -111,64 +110,12 @@ async fn set_budget_config(
     Ok(())
 }
 
-/// Opens a native file picker, copies the chosen image into the app's
-/// config dir (so it survives the source file moving/being deleted), and
-/// assigns it as the icon for `button_index`. Returns the stored path, or
-/// `None` if the user cancelled.
-#[tauri::command]
-async fn pick_icon_for_button(
-    app: tauri::AppHandle,
-    button_index: usize,
-) -> Result<Option<String>, String> {
-    require_screen_button(button_index)?;
-    let dialog_app = app.clone();
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .add_filter("Images", &["png", "jpg", "jpeg"])
-            .blocking_pick_file()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some(picked) = picked else {
-        return Ok(None);
-    };
-
-    let source = picked.into_path().map_err(|e| e.to_string())?;
-    let ext = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png");
-
-    let icons_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?
-        .join("icons");
-    std::fs::create_dir_all(&icons_dir).map_err(|e| e.to_string())?;
-
-    let dest = icons_dir.join(format!("button_{button_index}.{ext}"));
-    std::fs::copy(&source, &dest).map_err(|e| e.to_string())?;
-    let dest_str = dest.to_string_lossy().to_string();
-
-    let mut cfg = config::load(&app);
-    ensure_button_slot(&mut cfg, button_index);
-    cfg.buttons[button_index].icon_path = Some(dest_str.clone());
-    config::save(&app, &cfg).map_err(|e| e.to_string())?;
-    push_now(&app).await;
-
-    Ok(Some(dest_str))
-}
-
-/// Resets button assignments back to the clean 2-button default (session
-/// on 0, weekly on 1, everything else `none`). Does **not** and cannot
-/// restore whatever image another app (e.g. AJAZZ's Stream Dock) had on a
-/// button before Claude Deck painted over it — these HID displays are
-/// write-only, there's no way to read back or recall the previous image.
-/// The other app has to repaint it itself (switch pages/profiles in it, or
-/// unplug/replug the device).
+/// Resets every button back to `none` (nothing assigned). Does **not** and
+/// cannot restore whatever image another app (e.g. AJAZZ's Stream Dock)
+/// had on a button before Claude Deck painted over it — these HID
+/// displays are write-only, there's no way to read back or recall the
+/// previous image. The other app has to repaint it itself (switch
+/// pages/profiles in it, or unplug/replug the device).
 #[tauri::command]
 async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
     let mut cfg = config::load(&app);
@@ -296,19 +243,8 @@ async fn push_snapshot_to_device(
 
         let Some(entry) = entry else { continue };
 
-        let image = match &assignment.icon_path {
-            Some(path) => render::render_percent_on_background(
-                std::path::Path::new(path),
-                label,
-                entry.percent,
-                &entry.severity,
-                w as u32,
-                h as u32,
-            )?,
-            None => {
-                render::render_percent(label, entry.percent, &entry.severity, w as u32, h as u32)
-            }
-        };
+        let image =
+            render::render_percent(label, entry.percent, &entry.severity, w as u32, h as u32);
 
         device::push_image(&conn.device, conn.kind, index as u8, image).await?;
     }
@@ -368,7 +304,6 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -389,7 +324,6 @@ pub fn run() {
             get_config,
             set_button_metric,
             set_budget_config,
-            pick_icon_for_button,
             reset_button_assignments,
         ])
         .setup(|app| {

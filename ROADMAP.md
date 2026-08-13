@@ -94,15 +94,21 @@ accurate session/weekly usage with no manual steps beyond `claude login`.
 
 - [ ] Press-to-reveal reset time on a usage button (still deferred — needs
       real hardware to design the reader/reconnect interaction safely).
-- [x] Custom image upload per button (`pick_icon_for_button` command: native
-      file picker → copies into the app config dir → assigned as that
-      button's background). **No curated built-in icon set** — scope-cut
-      as a content/design task, not an architectural one; custom upload
-      covers the "choose the icon" requirement from the original ask.
-      Revisit if a built-in set turns out to matter to users.
-- [x] Button↔metric reassignment UI: settings table for all
-      `device::KEY_COUNT` (9) buttons, each independently assigned
-      session/weekly/budget/none via `set_button_metric`.
+- [x] ~~Custom image upload per button~~ — **built, then removed** after
+      real hardware testing (2026-08-14). The `pick_icon_for_button`
+      command worked, but it turned out to solve the wrong problem:
+      hardware testing showed the actual blocker was button *ownership*
+      (vendor software like AJAZZ's Stream Dock repainting over Claude
+      Deck on interaction), not decoration. Removed
+      `tauri-plugin-dialog`, `render_percent_on_background`, and
+      `icon_path` from config to keep scope matched to what actually
+      matters. No built-in icon set either — same reasoning.
+- [x] Button↔metric reassignment UI: settings grid laid out to match the
+      device's physical 2-row-of-3 screen layout (corrected from an
+      earlier flat list of all `device::KEY_COUNT` (9) buttons once
+      hardware testing showed only `SCREEN_KEY_COUNT` (6) have a screen).
+      **No button assigned by default** — user opts in per button, since
+      Claude Deck can't know what else is using a given button.
 - [x] Self-imposed daily soft-budget feature (`budget.rs`, SPEC.md §6.3):
       enable/cap % configurable in settings, computed locally from the
       weekly-percent delta since local midnight, rendered with its own
@@ -113,8 +119,8 @@ accurate session/weekly usage with no manual steps beyond `claude login`.
       crossing the cap yet** — small follow-up, not done.
 
 **Exit criteria mostly met**: two users can configure different button
-layouts, icons, and budget settings. OS notifications and press-to-reveal
-still open.
+layouts and budget settings. OS notifications and press-to-reveal still
+open. "Icons" dropped from the exit criteria per the removal above.
 
 ## Phase 4 — Multi-device support & robustness (2026-08-13)
 

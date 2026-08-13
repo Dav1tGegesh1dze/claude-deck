@@ -26,7 +26,6 @@ type Metric = "session" | "weekly" | "budget" | "none";
 
 interface ButtonAssignment {
   metric: Metric;
-  icon_path: string | null;
 }
 
 interface BudgetConfig {
@@ -151,12 +150,6 @@ async function readButtonEvents() {
   }
 }
 
-function iconLabel(path: string | null): string {
-  if (!path) return "none";
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
-
 async function loadSettings() {
   const cfg = await invoke<AppConfig>("get_config");
 
@@ -194,7 +187,7 @@ function renderButtonsGrid(buttons: ButtonAssignment[]) {
   grid.style.gridTemplateColumns = `repeat(${GRID_COLUMNS}, 1fr)`;
 
   for (let i = 0; i < SCREEN_KEY_COUNT; i++) {
-    const assignment: ButtonAssignment = buttons[i] ?? { metric: "none", icon_path: null };
+    const assignment: ButtonAssignment = buttons[i] ?? { metric: "none" };
 
     const card = document.createElement("div");
     card.className = "button-card";
@@ -223,25 +216,6 @@ function renderButtonsGrid(buttons: ButtonAssignment[]) {
       flashSaved(statusSpan);
     });
     card.appendChild(select);
-
-    const iconRow = document.createElement("div");
-    iconRow.className = "button-card-icon-row";
-    const iconLabelSpan = document.createElement("span");
-    iconLabelSpan.textContent = iconLabel(assignment.icon_path);
-    iconLabelSpan.className = "icon-label";
-    const iconBtn = document.createElement("button");
-    iconBtn.textContent = "Choose icon…";
-    iconBtn.addEventListener("click", async () => {
-      const path = await invoke<string | null>("pick_icon_for_button", { buttonIndex: i });
-      if (path) {
-        iconLabelSpan.textContent = iconLabel(path);
-        flashSaved(statusSpan);
-      }
-    });
-    iconRow.appendChild(iconBtn);
-    iconRow.appendChild(iconLabelSpan);
-    card.appendChild(iconRow);
-
     card.appendChild(statusSpan);
 
     grid.appendChild(card);
@@ -262,9 +236,9 @@ async function saveBudget() {
 
 async function resetButtons() {
   const confirmed = confirm(
-    "Reset all buttons to session (0) + weekly (1) only? This won't restore " +
-      "whatever another app had on the other buttons - it just stops Claude " +
-      "Deck from repainting them going forward.",
+    "Reset all buttons to \"none\"? This won't restore whatever another " +
+      "app had on any of them - it just stops Claude Deck from repainting " +
+      "them going forward.",
   );
   if (!confirmed) return;
   await invoke("reset_button_assignments");

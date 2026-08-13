@@ -30,8 +30,9 @@ finding out mid-task via a CLI error.
   (normal/warning/critical)
 - Menu bar / tray icon mirroring the same numbers
 - Per-button metric assignment (session / weekly / a self-imposed daily
-  budget) and custom icon images, applied immediately when changed in
-  Settings
+  budget / none), laid out in Settings to match the device's physical
+  grid, applied immediately when changed. No buttons assigned by default
+  — you opt in per button.
 - Zero-setup auth — reuses the OAuth token `claude login` already cached
   locally (macOS Keychain; `~/.claude/.credentials.json` elsewhere,
   unverified)

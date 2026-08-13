@@ -8,11 +8,9 @@
 //! rendered at its default instance.
 
 use ab_glyph::{FontArc, PxScale};
-use anyhow::{anyhow, Result};
-use image::{imageops::FilterType, DynamicImage, Rgb, RgbImage};
+use image::{DynamicImage, Rgb, RgbImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
-use std::path::Path;
 use std::sync::LazyLock;
 
 static FONT_BYTES: &[u8] = include_bytes!("../assets/Roboto-Variable.ttf");
@@ -103,24 +101,6 @@ pub fn render_percent(
         severity,
         None,
     )
-}
-
-/// Same as [render_percent], but drawn over a user-supplied custom icon
-/// image instead of a solid background (SPEC.md §6.2).
-pub fn render_percent_on_background(
-    background_path: &Path,
-    label: &str,
-    percent: f64,
-    severity: &str,
-    width: u32,
-    height: u32,
-) -> Result<DynamicImage> {
-    let base = image::open(background_path)
-        .map_err(|e| anyhow!("failed to load icon image {}: {e}", background_path.display()))?
-        .resize_exact(width, height, FilterType::Lanczos3)
-        .into_rgb8();
-
-    Ok(render_on(base, label, percent, severity, None))
 }
 
 /// A metric assigned to a button but not currently active (e.g. the

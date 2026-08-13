@@ -194,19 +194,6 @@ button {
   width: 100%;
 }
 
-.button-card-icon-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.3em;
-}
-
-.icon-label {
-  margin-left: 0.5em;
-  color: #888;
-  font-size: 0.85em;
-}
-
 .status-flash {
   font-size: 0.85em;
   color: #888;
