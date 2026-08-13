@@ -136,8 +136,7 @@ still open.
 
 ## Phase 5 — Public distribution (in progress, 2026-08-13)
 
-- [ ] Pick and add LICENSE — **waiting on user decision**, not something to
-      pick unilaterally for a public repo under someone else's name.
+- [x] LICENSE: MIT (user's choice).
 - [x] GitHub Actions: `.github/workflows/release.yml` builds macOS (.dmg)
       and Windows (.msi/.exe) via `tauri-apps/tauri-action` on `v*` tag push,
       creates a **draft** GitHub Release (not auto-published, so a tag push
