@@ -6,9 +6,15 @@ session (5-hour) and weekly (7-day) usage visible on the physical device at
 all times — no login, no API key. It reads the OAuth credentials Claude Code
 already caches locally after `claude login`.
 
-Status: first real-hardware test passed (session/weekly render correctly on
-an AKP03E). Still pre-release — see [ROADMAP.md](ROADMAP.md) for what's left.
-See [SPEC.md](SPEC.md) for the full design.
+## Download
+
+**[Get the latest release →](https://github.com/Dav1tGegesh1dze/claude-deck/releases/latest)**
+(macOS and Windows installers)
+
+Status: tested through several rounds of real hardware fixes on an AJAZZ
+AKP03E (macOS). Windows builds are produced by CI but haven't been tested on
+actual Windows hardware. See [ROADMAP.md](ROADMAP.md) for what's still open
+and [SPEC.md](SPEC.md) for the full design.
 
 ## Why
 
@@ -18,7 +24,7 @@ finding out mid-task via a CLI error.
 
 ## Supported hardware
 
-- AJAZZ AKP03E (primary/reference device, confirmed working)
+- AJAZZ AKP03E (primary/reference device — this is what it's been tested on)
 - Other devices supported by the [`mirajazz`](https://github.com/4ndv/mirajazz)
   protocol layer (AKP03/AKP03R + rev. 2 variants, Mirabox N3 6602/6603) —
   best-effort, untested
@@ -31,11 +37,13 @@ finding out mid-task via a CLI error.
 - Menu bar / tray icon mirroring the same numbers
 - Per-button metric assignment (session / weekly / a self-imposed daily
   budget / none), laid out in Settings to match the device's physical
-  grid, applied immediately when changed. No buttons assigned by default
-  — you opt in per button.
+  grid, applied immediately when changed
+- **No buttons assigned on first install** — every button starts at
+  `none`; you opt in per button. Once you assign one, that choice is saved
+  and reloaded on every future launch (it does not reset itself)
 - Zero-setup auth — reuses the OAuth token `claude login` already cached
   locally (macOS Keychain; `~/.claude/.credentials.json` elsewhere,
-  unverified)
+  unverified on Windows/Linux)
 
 ## Requirements
 
@@ -43,43 +51,39 @@ finding out mid-task via a CLI error.
 - Claude Code installed and logged in (`claude login`) on the same machine
 - macOS or Windows
 
-### Important: quit the vendor's control software first
+## Setup: configure your device's own software first
 
-If your device came with its own app (e.g. AJAZZ's "Stream Dock"), **quit it
-before using Claude Deck.** Claude Deck is display-only in v1 — it paints
-button images but doesn't intercept button presses — so if the vendor app is
-still running, pressing a button will still trigger whatever action *it* has
-bound there, regardless of what image Claude Deck is showing. Two apps can't
-both own the same physical device's button actions at once.
+If your device came with its own control app (e.g. AJAZZ's "Stream Dock"),
+**you need to use it before using Claude Deck** — not instead of it:
 
-### Only assign the buttons you want to give up
+1. Open your device's own app (Stream Dock, etc.) and decide which buttons
+   you want to dedicate to Claude Deck's usage display.
+2. For each of those buttons, set them to **blank / no action** in that
+   app. Don't leave a hotkey or app-launch bound to them.
+3. *Then* open Claude Deck and assign `session`/`weekly`/`budget` to those
+   same button positions in Settings.
+
+Why this order matters, confirmed against real hardware: Claude Deck is
+display-only — it paints button images but never intercepts button
+presses. If the vendor app still considers itself in charge of a button,
+it actively **repaints its own icon back** over Claude Deck's the moment
+you interact with that button. There is no partial-override — a button is
+either the vendor app's or Claude Deck's, not both. If you skip step 2,
+Claude Deck's display will keep getting overwritten and pressing the
+button will trigger whatever the vendor app had bound there.
 
 The AKP03E has 9 physical buttons but only **6 have a screen** (2 rows of
 3) — the other 3 are plain push-buttons and aren't shown in Claude Deck's
 settings, since there's nowhere to display anything on them.
 
-In Settings → Button assignments, leave every screen button you want a
-*different* app (vendor software, or nothing) to control set to `none` —
-Claude Deck skips those entirely.
-
-**Confirmed on real hardware**: it's not enough to just leave a button
-alone in Stream Dock and expect Claude Deck's image to stick — Stream Dock
-actively repaints its own icon back onto a button when you interact with
-it, if it still considers itself in charge of that button. So for any
-button you want Claude Deck to own: set it to blank/no action in Stream
-Dock, or quit Stream Dock entirely while running Claude Deck. There's no
-partial-override option — a button is either Stream Dock's or Claude
-Deck's, not both.
-
 These button displays are also **write-only**: there is no API to read
 back what's currently on a button, so Claude Deck has no way to detect
-"has this button already been configured by something else," and no way
-to restore a button's previous image once it's painted over it. If you
-accidentally let Claude Deck take over a button another app was using, use
-**Settings → Reset to defaults** to stop Claude Deck from repainting it
-going forward, then get the other app to redraw its own image (switch
-pages/profiles in it, or unplug/replug the device — most vendor software
-repaints its whole grid on reconnect).
+"has this button already been configured by something else." If you
+assign a button in Claude Deck and change your mind, **Settings → Reset
+all to none** (or switch that one button back to `none`) actively blanks
+its screen — it does not and cannot restore whatever the vendor app had
+on it before; that app has to repaint its own icon itself (switch
+pages/profiles in it, or unplug/replug the device).
 
 ## Development
 
