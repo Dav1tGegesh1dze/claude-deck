@@ -1,0 +1,38 @@
+[package]
+name = "claude-deck"
+version = "0.1.0"
+description = "Live Claude Code session/weekly usage on a physical stream-controller device"
+authors = ["Davit Gegeshidze"]
+license = "MIT"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mirajazz = "0.16.2"
+reqwest = { version = "0.13.4", features = ["json"] }
+keyring = "4.1.6"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+dirs = "6.0.0"
+anyhow = "1.0.104"
+image = "0.25.10"
+ab_glyph = "0.2.32"
+imageproc = "0.27.0"
+tauri-plugin-log = "2.9.0"
+log = "0.4.33"
+
