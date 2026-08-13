@@ -134,14 +134,24 @@ still open.
       the OS log dir in production, so a user reporting an issue has a real
       file to share.
 
-## Phase 5 — Public distribution
+## Phase 5 — Public distribution (in progress, 2026-08-13)
 
-- [ ] Pick and add LICENSE (MIT recommended for max adoption).
-- [ ] GitHub Actions workflow: build macOS (.dmg) and Windows (.msi/.exe) on
-      tag push, attach to a GitHub Release.
-- [ ] README: install instructions, supported devices, `claude login`
-      prerequisite, unsigned-binary security-prompt note, troubleshooting.
-- [ ] Public v1.0.0 release.
+- [ ] Pick and add LICENSE — **waiting on user decision**, not something to
+      pick unilaterally for a public repo under someone else's name.
+- [x] GitHub Actions: `.github/workflows/release.yml` builds macOS (.dmg)
+      and Windows (.msi/.exe) via `tauri-apps/tauri-action` on `v*` tag push,
+      creates a **draft** GitHub Release (not auto-published, so a tag push
+      can't accidentally ship something unverified). `.github/workflows/ci.yml`
+      runs build+test on every push/PR to main/develop.
+- [x] README: install requirements, features, supported devices, `claude
+      login` prerequisite, dev setup. Unsigned-binary security-prompt note
+      still to add once a release is actually cut (wording depends on
+      what Gatekeeper/SmartScreen actually show, easier to write accurately
+      after seeing it once).
+- [ ] Public v1.0.0 release — **blocked**: nothing has been run against
+      real hardware yet (see Phase 0). Shipping installers to other AJAZZ
+      owners before that would be irresponsible even though the code
+      compiles clean and is unit-tested where it can be.
 
 ## Phase 6 — Stretch (post-v1, not committed)
 
