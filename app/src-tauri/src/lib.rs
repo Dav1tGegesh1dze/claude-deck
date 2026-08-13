@@ -1,3 +1,4 @@
+mod budget;
 mod config;
 mod device;
 mod render;
@@ -10,6 +11,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
 
 struct ConnectedDevice {
@@ -62,10 +64,95 @@ async fn read_button_events(timeout_secs: u64) -> Result<Vec<device::ButtonEvent
 /// running poll loop is a small follow-up, not done yet.
 #[tauri::command]
 async fn set_refresh_interval(app: tauri::AppHandle, seconds: u64) -> Result<(), String> {
-    let cfg = config::AppConfig {
-        refresh_interval_secs: seconds,
+    let mut cfg = config::load(&app);
+    cfg.refresh_interval_secs = seconds;
+    config::save(&app, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_config(app: tauri::AppHandle) -> Result<config::AppConfig, String> {
+    Ok(config::load(&app))
+}
+
+#[tauri::command]
+async fn set_button_metric(
+    app: tauri::AppHandle,
+    button_index: usize,
+    metric: config::Metric,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    ensure_button_slot(&mut cfg, button_index);
+    cfg.buttons[button_index].metric = metric;
+    config::save(&app, &cfg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_budget_config(
+    app: tauri::AppHandle,
+    enabled: bool,
+    daily_cap_percent: f64,
+) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    cfg.budget = config::BudgetConfig {
+        enabled,
+        daily_cap_percent,
     };
     config::save(&app, &cfg).map_err(|e| e.to_string())
+}
+
+/// Opens a native file picker, copies the chosen image into the app's
+/// config dir (so it survives the source file moving/being deleted), and
+/// assigns it as the icon for `button_index`. Returns the stored path, or
+/// `None` if the user cancelled.
+#[tauri::command]
+async fn pick_icon_for_button(
+    app: tauri::AppHandle,
+    button_index: usize,
+) -> Result<Option<String>, String> {
+    let dialog_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter("Images", &["png", "jpg", "jpeg"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+
+    let source = picked.into_path().map_err(|e| e.to_string())?;
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+
+    let icons_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("icons");
+    std::fs::create_dir_all(&icons_dir).map_err(|e| e.to_string())?;
+
+    let dest = icons_dir.join(format!("button_{button_index}.{ext}"));
+    std::fs::copy(&source, &dest).map_err(|e| e.to_string())?;
+    let dest_str = dest.to_string_lossy().to_string();
+
+    let mut cfg = config::load(&app);
+    ensure_button_slot(&mut cfg, button_index);
+    cfg.buttons[button_index].icon_path = Some(dest_str.clone());
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+
+    Ok(Some(dest_str))
+}
+
+fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
+    while cfg.buttons.len() <= index {
+        cfg.buttons.push(config::ButtonAssignment::default());
+    }
 }
 
 fn session_and_weekly(
@@ -76,13 +163,14 @@ fn session_and_weekly(
     (session, weekly)
 }
 
-/// Pushes session/weekly to the physical device (buttons 0/1) if one is
+/// Pushes each configured button's metric to the physical device if one is
 /// connected (auto-connecting on first use), and updates the tray tooltip.
 /// Best-effort: a missing device or a push failure is logged, not fatal —
 /// the app is still useful via its own window either way.
 async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot) {
     update_tray_tooltip(app, snapshot);
 
+    let cfg = config::load(app);
     let state = app.state::<AppState>();
     let mut guard = state.device.lock().await;
 
@@ -97,7 +185,7 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
     }
 
     let push_result = if let Some(conn) = guard.as_ref() {
-        push_snapshot_to_device(conn, snapshot).await
+        push_snapshot_to_device(app, conn, snapshot, &cfg).await
     } else {
         return;
     };
@@ -109,20 +197,43 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
 }
 
 async fn push_snapshot_to_device(
+    app: &tauri::AppHandle,
     conn: &ConnectedDevice,
     snapshot: &usage::UsageSnapshot,
+    cfg: &config::AppConfig,
 ) -> anyhow::Result<()> {
     let (w, h) = conn.kind.image_format().size;
     let (session, weekly) = session_and_weekly(snapshot);
+    let weekly_percent = weekly.map(|l| l.percent).unwrap_or(0.0);
 
-    if let Some(session) = session {
-        let img = render::render_percent(session.percent, &session.severity, w as u32, h as u32);
-        device::push_image(&conn.device, conn.kind, 0, img).await?;
-    }
+    for (index, assignment) in cfg.buttons.iter().enumerate() {
+        if index >= device::KEY_COUNT {
+            break;
+        }
 
-    if let Some(weekly) = weekly {
-        let img = render::render_percent(weekly.percent, &weekly.severity, w as u32, h as u32);
-        device::push_image(&conn.device, conn.kind, 1, img).await?;
+        let entry: Option<usage::LimitEntry> = match assignment.metric {
+            config::Metric::Session => session.cloned(),
+            config::Metric::Weekly => weekly.cloned(),
+            config::Metric::Budget if cfg.budget.enabled => {
+                Some(budget::compute(app, &cfg.budget, weekly_percent))
+            }
+            config::Metric::Budget | config::Metric::None => None,
+        };
+
+        let Some(entry) = entry else { continue };
+
+        let image = match &assignment.icon_path {
+            Some(path) => render::render_percent_on_background(
+                std::path::Path::new(path),
+                entry.percent,
+                &entry.severity,
+                w as u32,
+                h as u32,
+            )?,
+            None => render::render_percent(entry.percent, &entry.severity, w as u32, h as u32),
+        };
+
+        device::push_image(&conn.device, conn.kind, index as u8, image).await?;
     }
 
     Ok(())
@@ -178,6 +289,7 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             latest_usage: Arc::new(Mutex::new(None)),
             device: Arc::new(Mutex::new(None)),
@@ -189,6 +301,10 @@ pub fn run() {
             push_test_pattern,
             read_button_events,
             set_refresh_interval,
+            get_config,
+            set_button_metric,
+            set_budget_config,
+            pick_icon_for_button,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

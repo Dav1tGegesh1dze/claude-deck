@@ -37,6 +37,42 @@
 
       <hr />
 
+      <h2>Settings</h2>
+
+      <div class="row settings-row">
+        <label for="refresh-interval-input">Refresh interval (seconds)</label>
+        <input id="refresh-interval-input" type="number" min="30" step="30" />
+        <button id="save-refresh-interval-btn">Save</button>
+      </div>
+
+      <div class="row settings-row">
+        <label for="budget-enabled-input">
+          <input id="budget-enabled-input" type="checkbox" />
+          Self-imposed daily budget
+        </label>
+        <input id="budget-cap-input" type="number" min="1" step="1" />
+        <span class="hint">% of weekly budget per day</span>
+        <button id="save-budget-btn">Save</button>
+      </div>
+
+      <h3>Button assignments</h3>
+      <p class="hint">
+        Which metric each device button shows, and an optional custom icon
+        behind the gauge. Button 0/1 default to session/weekly.
+      </p>
+      <table id="buttons-table">
+        <thead>
+          <tr>
+            <th>Button</th>
+            <th>Metric</th>
+            <th>Icon</th>
+          </tr>
+        </thead>
+        <tbody id="buttons-tbody"></tbody>
+      </table>
+
+      <hr />
+
       <h2>Device (Phase 0/1 spike controls)</h2>
       <div class="row">
         <button id="list-devices-btn">List devices</button>

@@ -4,15 +4,77 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Metric {
+    Session,
+    Weekly,
+    Budget,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ButtonAssignment {
+    pub metric: Metric,
+    pub icon_path: Option<String>,
+}
+
+impl Default for ButtonAssignment {
+    fn default() -> Self {
+        Self {
+            metric: Metric::None,
+            icon_path: None,
+        }
+    }
+}
+
+/// A user-defined soft cap layered on top of the real weekly limit — not
+/// something Anthropic enforces. See SPEC.md §6.3 and budget.rs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    pub enabled: bool,
+    /// How many percentage-points of the weekly budget the user wants to
+    /// avoid burning in a single day.
+    pub daily_cap_percent: f64,
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            daily_cap_percent: 20.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub refresh_interval_secs: u64,
+    #[serde(default = "default_buttons")]
+    pub buttons: Vec<ButtonAssignment>,
+    #[serde(default)]
+    pub budget: BudgetConfig,
+}
+
+fn default_buttons() -> Vec<ButtonAssignment> {
+    vec![
+        ButtonAssignment {
+            metric: Metric::Session,
+            icon_path: None,
+        },
+        ButtonAssignment {
+            metric: Metric::Weekly,
+            icon_path: None,
+        },
+    ]
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             refresh_interval_secs: 300,
+            buttons: default_buttons(),
+            budget: BudgetConfig::default(),
         }
     }
 }

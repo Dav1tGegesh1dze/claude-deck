@@ -90,21 +90,31 @@ hardcoded image") still pending real hardware.
 **Exit criteria**: this is a usable v1 — physical device shows live,
 accurate session/weekly usage with no manual steps beyond `claude login`.
 
-## Phase 3 — Personalization
+## Phase 3 — Personalization (mostly done, 2026-08-13)
 
-- [ ] Press-to-reveal reset time on a usage button (moved from Phase 2 —
-      needs real hardware to design the reader/reconnect interaction
-      safely, see note above).
-- [ ] Built-in icon set + custom image upload per button.
-- [ ] Button↔metric reassignment UI (any button can show session, weekly,
-      or the Phase 3.5 self-imposed budget).
-- [ ] Self-imposed daily/monthly soft-budget feature (§6.3 of SPEC.md):
-      config UI, local calculation, distinct visual treatment from the two
-      official numbers, optional OS notification on crossing the cap.
+- [ ] Press-to-reveal reset time on a usage button (still deferred — needs
+      real hardware to design the reader/reconnect interaction safely).
+- [x] Custom image upload per button (`pick_icon_for_button` command: native
+      file picker → copies into the app config dir → assigned as that
+      button's background). **No curated built-in icon set** — scope-cut
+      as a content/design task, not an architectural one; custom upload
+      covers the "choose the icon" requirement from the original ask.
+      Revisit if a built-in set turns out to matter to users.
+- [x] Button↔metric reassignment UI: settings table for all
+      `device::KEY_COUNT` (9) buttons, each independently assigned
+      session/weekly/budget/none via `set_button_metric`.
+- [x] Self-imposed daily soft-budget feature (`budget.rs`, SPEC.md §6.3):
+      enable/cap % configurable in settings, computed locally from the
+      weekly-percent delta since local midnight, rendered with its own
+      `"budget"` kind (visually identical gauge style, but conceptually
+      distinct — never mixed into the real session/weekly numbers). Known
+      limitation documented in the module: under-counts for the rest of a
+      day if the weekly window resets mid-day. **No OS notification on
+      crossing the cap yet** — small follow-up, not done.
 
-**Exit criteria**: two users with the same device can configure visibly
-different setups (different icons, different button assignments, one using
-the soft-budget feature and one not).
+**Exit criteria mostly met**: two users can configure different button
+layouts, icons, and budget settings. OS notifications and press-to-reveal
+still open.
 
 ## Phase 4 — Multi-device support & robustness
 
