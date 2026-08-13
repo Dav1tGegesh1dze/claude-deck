@@ -33,4 +33,6 @@ image = "0.25.10"
 ab_glyph = "0.2.32"
 imageproc = "0.27.0"
 tauri-plugin-dialog = "2.7.2"
+tauri-plugin-log = "2.9.0"
+log = "0.4.33"
 
