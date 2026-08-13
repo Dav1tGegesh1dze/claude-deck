@@ -158,6 +158,47 @@ open. "Icons" dropped from the exit criteria per the removal above.
       owners before that would be irresponsible even though the code
       compiles clean and is unit-tested where it can be.
 
+## Known issues — found 2026-08-14, fix before wider sharing
+
+Found during real-world use of v0.1.x, deliberately **not fixed yet** —
+documented for the next session rather than changed mid-release-cycle.
+
+- [ ] **429 rate limiting on the usage endpoint at low poll intervals.**
+      User hit `HTTP 429 Too Many Requests` with `refresh_interval_secs`
+      manually set to 50. Researched rather than guessed: our request
+      headers (`Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20`)
+      already match a known-working reference implementation
+      ([claude-code-statusline](https://github.com/ohugonnot/claude-code-statusline)),
+      which explicitly defaults to `REFRESH_INTERVAL=300` and warns *"do
+      not set to 0 (causes rate limiting)"*. So this isn't a missing-header
+      bug — the endpoint's undocumented rate limit genuinely does not
+      tolerate aggressive polling. Two related upstream reports confirm
+      this is a known rough edge in the endpoint itself, not something we
+      can fully engineer around:
+      [anthropics/claude-code#31021](https://github.com/anthropics/claude-code/issues/31021),
+      [anthropics/claude-code#31637](https://github.com/anthropics/claude-code/issues/31637)
+      (the latter also notes 429s can persist with no `Retry-After` header
+      even after exponential backoff).
+      **Proposed fix**: enforce a sane minimum in the refresh-interval
+      setting UI (user suggested 100s as a floor; given the reference
+      tool's proven-safe default is 300s, consider defaulting new installs
+      to 300s and floor-clamping manual input well above 50 — exact
+      numbers to decide next session) plus handling a `429`/`Retry-After`
+      response by backing off rather than just marking the poll failed.
+- [ ] **Tray/menu-bar icon likely isn't rendering at all**, not just
+      wrong-looking. Checked `TrayIconBuilder` in `lib.rs`: `.icon(...)`
+      is never called. Confirmed via Tauri's own source
+      (`crates/tauri/src/tray/mod.rs`) that `.icon()` is optional with
+      **no automatic fallback** — nothing else in `build()`/`build_inner()`
+      assigns a default icon. Could not visually confirm with a screenshot
+      (Screen Recording permission blocked for the automation in this
+      environment), but the code path is unambiguous enough to treat this
+      as a real bug, not just polish.
+      **Proposed fix**: add a proper small monochrome "template" icon
+      (macOS menu-bar convention — single-color silhouette + alpha, like
+      Scroll Reverser or other background-utility apps use) and pass it to
+      `.icon(...)`. See SPEC.md §6.4 for the requirement this adds.
+
 ## Phase 6 — Stretch (post-v1, not committed)
 
 - [ ] Linux packaging.
