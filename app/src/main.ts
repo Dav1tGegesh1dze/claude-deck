@@ -236,9 +236,10 @@ async function saveBudget() {
 
 async function resetButtons() {
   const confirmed = confirm(
-    "Reset all buttons to \"none\"? This won't restore whatever another " +
-      "app had on any of them - it just stops Claude Deck from repainting " +
-      "them going forward.",
+    "Reset all buttons to \"none\"? Any button Claude Deck currently owns " +
+      "will be blanked. This can't restore whatever another app had on " +
+      "it before Claude Deck painted over it - that app has to repaint " +
+      "its own icon itself.",
   );
   if (!confirmed) return;
   await invoke("reset_button_assignments");

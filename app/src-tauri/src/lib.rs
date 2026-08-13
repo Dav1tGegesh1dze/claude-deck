@@ -86,10 +86,12 @@ async fn set_button_metric(
     metric: config::Metric,
 ) -> Result<(), String> {
     require_screen_button(button_index)?;
-    let mut cfg = config::load(&app);
+    let old_cfg = config::load(&app);
+    let mut cfg = old_cfg.clone();
     ensure_button_slot(&mut cfg, button_index);
     cfg.buttons[button_index].metric = metric;
     config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    clear_released_buttons(&app, &old_cfg, &cfg).await;
     push_now(&app).await;
     Ok(())
 }
@@ -110,19 +112,61 @@ async fn set_budget_config(
     Ok(())
 }
 
-/// Resets every button back to `none` (nothing assigned). Does **not** and
-/// cannot restore whatever image another app (e.g. AJAZZ's Stream Dock)
-/// had on a button before Claude Deck painted over it — these HID
-/// displays are write-only, there's no way to read back or recall the
-/// previous image. The other app has to repaint it itself (switch
+/// Resets every button back to `none` (nothing assigned), and actively
+/// blanks the screen on any button that was previously assigned — see
+/// clear_released_buttons. Cannot restore whatever image another app
+/// (e.g. AJAZZ's Stream Dock) had on a button before Claude Deck painted
+/// over it — these HID displays are write-only, there's no way to read
+/// back or recall a *previous* image, only blank the current one. The
+/// other app still has to repaint its own icon itself (switch
 /// pages/profiles in it, or unplug/replug the device).
 #[tauri::command]
 async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
-    let mut cfg = config::load(&app);
+    let old_cfg = config::load(&app);
+    let mut cfg = old_cfg.clone();
     cfg.buttons = config::default_buttons();
     config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    clear_released_buttons(&app, &old_cfg, &cfg).await;
     push_now(&app).await;
     Ok(())
+}
+
+/// For any screen button that was assigned a metric in `old` but is
+/// `none` in `new`, actively blanks that button's screen via
+/// `Device::clear_button_image` instead of just leaving the last-rendered
+/// gauge stuck there — "unassigning" a button should look unassigned.
+/// Best-effort: silently does nothing if no device is connected.
+async fn clear_released_buttons(
+    app: &tauri::AppHandle,
+    old: &config::AppConfig,
+    new: &config::AppConfig,
+) {
+    let state = app.state::<AppState>();
+    let guard = state.device.lock().await;
+    let Some(conn) = guard.as_ref() else {
+        return;
+    };
+
+    let mut cleared_any = false;
+
+    for i in 0..device::SCREEN_KEY_COUNT {
+        let was = old.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
+        let now = new.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
+
+        if was != config::Metric::None && now == config::Metric::None {
+            if let Err(e) = conn.device.clear_button_image(i as u8).await {
+                log::error!("failed to clear button {i}: {e}");
+            } else {
+                cleared_any = true;
+            }
+        }
+    }
+
+    if cleared_any {
+        if let Err(e) = conn.device.flush().await {
+            log::error!("failed to flush after clearing buttons: {e}");
+        }
+    }
 }
 
 fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
