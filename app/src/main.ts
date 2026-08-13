@@ -168,7 +168,7 @@ async function loadSettings() {
   if (budgetEnabled) budgetEnabled.checked = cfg.budget.enabled;
   if (budgetCap) budgetCap.value = String(cfg.budget.daily_cap_percent);
 
-  renderButtonsTable(cfg.buttons);
+  renderButtonsGrid(cfg.buttons);
 }
 
 function flashSaved(el: HTMLElement) {
@@ -180,25 +180,33 @@ function flashSaved(el: HTMLElement) {
   }, 1500);
 }
 
-function renderButtonsTable(buttons: ButtonAssignment[]) {
-  const tbody = document.querySelector<HTMLElement>("#buttons-tbody");
-  if (!tbody) return;
+// Physical layout confirmed against a real AKP03E: 2 rows of 3 screen
+// buttons, left to right, top to bottom - button index order already
+// matches this reading order, so a 3-column CSS grid over indices 0..5 in
+// sequence reproduces the device layout directly.
+const GRID_COLUMNS = 3;
 
-  tbody.innerHTML = "";
+function renderButtonsGrid(buttons: ButtonAssignment[]) {
+  const grid = document.querySelector<HTMLElement>("#buttons-grid");
+  if (!grid) return;
+
+  grid.innerHTML = "";
+  grid.style.gridTemplateColumns = `repeat(${GRID_COLUMNS}, 1fr)`;
 
   for (let i = 0; i < SCREEN_KEY_COUNT; i++) {
     const assignment: ButtonAssignment = buttons[i] ?? { metric: "none", icon_path: null };
 
-    const row = document.createElement("tr");
+    const card = document.createElement("div");
+    card.className = "button-card";
 
-    const indexCell = document.createElement("td");
-    indexCell.textContent = String(i);
-    row.appendChild(indexCell);
+    const title = document.createElement("div");
+    title.className = "button-card-title";
+    title.textContent = `Button ${i}`;
+    card.appendChild(title);
 
     const statusSpan = document.createElement("span");
     statusSpan.className = "status-flash";
 
-    const metricCell = document.createElement("td");
     const select = document.createElement("select");
     for (const option of ["session", "weekly", "budget", "none"] as Metric[]) {
       const opt = document.createElement("option");
@@ -214,10 +222,10 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
       });
       flashSaved(statusSpan);
     });
-    metricCell.appendChild(select);
-    row.appendChild(metricCell);
+    card.appendChild(select);
 
-    const iconCell = document.createElement("td");
+    const iconRow = document.createElement("div");
+    iconRow.className = "button-card-icon-row";
     const iconLabelSpan = document.createElement("span");
     iconLabelSpan.textContent = iconLabel(assignment.icon_path);
     iconLabelSpan.className = "icon-label";
@@ -230,15 +238,13 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
         flashSaved(statusSpan);
       }
     });
-    iconCell.appendChild(iconBtn);
-    iconCell.appendChild(iconLabelSpan);
-    row.appendChild(iconCell);
+    iconRow.appendChild(iconBtn);
+    iconRow.appendChild(iconLabelSpan);
+    card.appendChild(iconRow);
 
-    const statusCell = document.createElement("td");
-    statusCell.appendChild(statusSpan);
-    row.appendChild(statusCell);
+    card.appendChild(statusSpan);
 
-    tbody.appendChild(row);
+    grid.appendChild(card);
   }
 }
 

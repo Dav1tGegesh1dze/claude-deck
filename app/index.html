@@ -56,38 +56,22 @@
       </div>
 
       <h3>Button assignments</h3>
+      <div class="warning-box">
+        ⚠️ Before assigning a button below, make sure that same button is
+        set to <strong>empty / no action</strong> in AJAZZ's Stream Dock
+        (or whatever other control app you use) — otherwise that app will
+        keep overwriting Claude Deck's display every time you press it.
+        Claude Deck can't detect or override that from its side.
+      </div>
       <p class="hint">
-        Only the 6 buttons with a screen are listed (buttons 6-8 are plain
-        push-buttons with no display). Only assign the ones you want to
-        dedicate to Claude Deck — leave the rest as "none" so it never
-        touches them. Changes save immediately, no separate Save step.
-      </p>
-      <p class="hint">
-        <strong>If you also use vendor software</strong> (e.g. AJAZZ's
-        Stream Dock) for other buttons: it's not enough to just leave a
-        button assigned in Stream Dock and hope Claude Deck's image sticks
-        — Stream Dock actively repaints its own icon back when you press a
-        button it still manages. For any button you want Claude Deck to
-        own, set it to blank/no action in Stream Dock first, or quit
-        Stream Dock entirely while using Claude Deck. These displays are
-        write-only, so there's no way for Claude Deck (or you, from here)
-        to restore whatever was on a button before — the other app has to
-        repaint it itself.
+        Laid out to match the physical device: 2 rows of 3 screen buttons.
+        (The AKP03E also has 3 plain push-buttons and 3 knobs below these —
+        not shown here, they have no screen.) Changes save immediately.
       </p>
       <div class="row">
         <button id="reset-buttons-btn">Reset to defaults (session + weekly only)</button>
       </div>
-      <table id="buttons-table">
-        <thead>
-          <tr>
-            <th>Button</th>
-            <th>Metric</th>
-            <th>Icon</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="buttons-tbody"></tbody>
-      </table>
+      <div id="buttons-grid" class="buttons-grid"></div>
 
       <hr />
 
