@@ -56,7 +56,12 @@ pub struct AppConfig {
     pub budget: BudgetConfig,
 }
 
-fn default_buttons() -> Vec<ButtonAssignment> {
+/// The clean 2-button default: session + weekly, every other button left
+/// at `none` so Claude Deck never touches it. Exposed as `pub` so a
+/// "reset to defaults" action can get back here after a user has assigned
+/// (and had Claude Deck paint over) buttons they meant to leave for other
+/// software like AJAZZ's Stream Dock.
+pub fn default_buttons() -> Vec<ButtonAssignment> {
     vec![
         ButtonAssignment {
             metric: Metric::Session,

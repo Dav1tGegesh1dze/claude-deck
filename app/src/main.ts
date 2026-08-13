@@ -231,6 +231,17 @@ async function saveBudget() {
   await invoke("set_budget_config", { enabled, dailyCapPercent: cap });
 }
 
+async function resetButtons() {
+  const confirmed = confirm(
+    "Reset all buttons to session (0) + weekly (1) only? This won't restore " +
+      "whatever another app had on the other buttons - it just stops Claude " +
+      "Deck from repainting them going forward.",
+  );
+  if (!confirmed) return;
+  await invoke("reset_button_assignments");
+  await loadSettings();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#refresh-btn")?.addEventListener("click", refreshNow);
   document.querySelector("#list-devices-btn")?.addEventListener("click", listDevices);
@@ -240,6 +251,7 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector("#save-refresh-interval-btn")
     ?.addEventListener("click", saveRefreshInterval);
   document.querySelector("#save-budget-btn")?.addEventListener("click", saveBudget);
+  document.querySelector("#reset-buttons-btn")?.addEventListener("click", resetButtons);
 
   loadCached();
   loadSettings();

@@ -57,9 +57,18 @@
 
       <h3>Button assignments</h3>
       <p class="hint">
-        Which metric each device button shows, and an optional custom icon
-        behind the gauge. Button 0/1 default to session/weekly.
+        Only assign the buttons you want to dedicate to Claude Deck — leave
+        the rest as "none" so it never touches them. If you also use
+        vendor software (e.g. AJAZZ's Stream Dock) for other buttons, quit
+        it while running Claude Deck (see README) to avoid both fighting
+        over the same device. These displays are write-only: once Claude
+        Deck paints a button, there's no way for it (or you, from here) to
+        restore whatever was on it before — the other app has to repaint
+        it itself.
       </p>
+      <div class="row">
+        <button id="reset-buttons-btn">Reset to defaults (session + weekly only)</button>
+      </div>
       <table id="buttons-table">
         <thead>
           <tr>

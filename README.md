@@ -51,6 +51,23 @@ still running, pressing a button will still trigger whatever action *it* has
 bound there, regardless of what image Claude Deck is showing. Two apps can't
 both own the same physical device's button actions at once.
 
+### Only assign the buttons you want to give up
+
+In Settings → Button assignments, leave every button you want a *different*
+app (vendor software, or nothing) to control set to `none` — Claude Deck
+skips those entirely. Only assign `session`/`weekly`/`budget` to buttons you
+want dedicated to it.
+
+These button displays are **write-only**: there is no API to read back
+what's currently on a button, so Claude Deck has no way to detect "has this
+button already been configured by something else," and no way to restore a
+button's previous image once it's painted over it. If you accidentally let
+Claude Deck take over a button another app was using, use **Settings →
+Reset to defaults** to stop Claude Deck from repainting it going forward,
+then get the other app to redraw its own image (switch pages/profiles in
+it, or unplug/replug the device — most vendor software repaints its whole
+grid on reconnect).
+
 ## Development
 
 ```sh

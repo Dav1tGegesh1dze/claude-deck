@@ -22,6 +22,10 @@ struct ConnectedDevice {
 struct AppState {
     latest_usage: Arc<Mutex<Option<usage::UsageSnapshot>>>,
     device: Arc<Mutex<Option<ConnectedDevice>>>,
+    /// Cached OAuth token so we don't re-touch the OS credential store
+    /// (macOS Keychain, which prompts) on every poll tick — see
+    /// usage::poll_cached.
+    cached_token: Arc<Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -37,7 +41,9 @@ async fn refresh_usage_now(
     state: tauri::State<'_, AppState>,
 ) -> Result<usage::UsageSnapshot, String> {
     let client = reqwest::Client::new();
-    let snapshot = usage::poll_once(&client).await.map_err(|e| e.to_string())?;
+    let snapshot = usage::poll_cached(&client, &state.cached_token)
+        .await
+        .map_err(|e| e.to_string())?;
     *state.latest_usage.lock().await = Some(snapshot.clone());
     apply_snapshot(&app, &snapshot).await;
     Ok(snapshot)
@@ -152,6 +158,22 @@ async fn pick_icon_for_button(
     push_now(&app).await;
 
     Ok(Some(dest_str))
+}
+
+/// Resets button assignments back to the clean 2-button default (session
+/// on 0, weekly on 1, everything else `none`). Does **not** and cannot
+/// restore whatever image another app (e.g. AJAZZ's Stream Dock) had on a
+/// button before Claude Deck painted over it — these HID displays are
+/// write-only, there's no way to read back or recall the previous image.
+/// The other app has to repaint it itself (switch pages/profiles in it, or
+/// unplug/replug the device).
+#[tauri::command]
+async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    cfg.buttons = config::default_buttons();
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    push_now(&app).await;
+    Ok(())
 }
 
 fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
@@ -298,7 +320,9 @@ fn update_tray_tooltip(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot) 
 
 fn spawn_usage_poller(app: &tauri::AppHandle) {
     let app = app.clone();
-    let latest_usage = app.state::<AppState>().latest_usage.clone();
+    let state = app.state::<AppState>();
+    let latest_usage = state.latest_usage.clone();
+    let cached_token = state.cached_token.clone();
 
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::new();
@@ -310,7 +334,7 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
         loop {
             interval.tick().await;
 
-            match usage::poll_once(&client).await {
+            match usage::poll_cached(&client, &cached_token).await {
                 Ok(snapshot) => {
                     *latest_usage.lock().await = Some(snapshot.clone());
                     let _ = app.emit("usage://updated", &snapshot);
@@ -338,6 +362,7 @@ pub fn run() {
         .manage(AppState {
             latest_usage: Arc::new(Mutex::new(None)),
             device: Arc::new(Mutex::new(None)),
+            cached_token: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             get_usage_snapshot,
@@ -350,6 +375,7 @@ pub fn run() {
             set_button_metric,
             set_budget_config,
             pick_icon_for_button,
+            reset_button_assignments,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -370,10 +396,11 @@ pub fn run() {
             // Fetch once immediately on startup so the UI (and device, and
             // tray) have data without waiting for the first interval tick.
             let startup_state = handle.state::<AppState>().latest_usage.clone();
+            let startup_token = handle.state::<AppState>().cached_token.clone();
             let startup_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 let client = reqwest::Client::new();
-                match usage::poll_once(&client).await {
+                match usage::poll_cached(&client, &startup_token).await {
                     Ok(snapshot) => {
                         *startup_state.lock().await = Some(snapshot.clone());
                         let _ = startup_handle.emit("usage://updated", &snapshot);
