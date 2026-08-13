@@ -3,6 +3,7 @@ name = "claude-deck"
 version = "0.1.0"
 description = "Live Claude Code session/weekly usage on a physical stream-controller device"
 authors = ["Davit Gegeshidze"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
