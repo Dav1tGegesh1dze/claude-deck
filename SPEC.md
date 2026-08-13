@@ -140,6 +140,18 @@ actively running.
 ### 6.4 Host-side presence
 - Menu bar / system tray icon on the host OS mirroring the same two
   official numbers, for when the user isn't looking at the physical device.
+  This is also how the app stays reachable after the window is closed
+  (§6.1's window hides rather than quits — see ROADMAP.md) — the tray icon
+  is the only remaining visible sign the app is running, so it must
+  actually be visible.
+- **macOS**: the tray icon must be a proper small monochrome "template"
+  image (single-color silhouette + alpha channel, following the same
+  convention as other background-utility menu-bar apps — e.g. Scroll
+  Reverser, or AJAZZ's own control app), not the full-color app bundle
+  icon. Confirmed as a gap on 2026-08-14: `TrayIconBuilder` was never
+  given an explicit `.icon(...)`, and Tauri has no automatic fallback for
+  this, so the current build likely shows no menu-bar icon at all. See
+  ROADMAP.md "Known issues" for the fix.
 - Settings window: button↔metric mapping (grid matching the physical
   device), refresh interval, soft-budget configuration.
 
