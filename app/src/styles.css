@@ -157,22 +157,51 @@ button {
   font-size: 0.85em;
 }
 
-table {
-  margin: 0 auto;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  padding: 0.3em 0.8em;
+.warning-box {
+  max-width: 34em;
+  margin: 0.8em auto;
+  padding: 0.8em 1em;
+  border: 1px solid #d8a400;
+  border-radius: 8px;
+  background: #d8a40022;
+  font-size: 0.9em;
   text-align: left;
-  border-bottom: 1px solid #ddd2;
 }
 
-.icon-label {
-  margin-left: 0.5em;
-  color: #888;
+.buttons-grid {
+  display: grid;
+  gap: 1em;
+  max-width: 34em;
+  margin: 1em auto;
+}
+
+.button-card {
+  border: 1px solid #ddd2;
+  border-radius: 10px;
+  padding: 0.8em;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.button-card-title {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.button-card select {
+  width: 100%;
+}
+
+.status-flash {
   font-size: 0.85em;
+  color: #888;
+}
+
+.status-flash.saved-flash {
+  color: #2e9e4c;
+  font-weight: 600;
 }
 
 #device-output {

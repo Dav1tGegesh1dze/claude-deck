@@ -106,7 +106,28 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageS
 
 /// One poll attempt: read the token fresh each time (cheap, and tolerates
 /// token refresh/rotation between polls) and fetch usage.
-pub async fn poll_once(client: &reqwest::Client) -> Result<UsageSnapshot> {
-    let token = read_access_token()?;
-    fetch_usage(client, &token).await
+/// Polls usage, reusing a cached token when possible so the OS credential
+/// store (macOS Keychain, which prompts the user) isn't touched on every
+/// single poll tick — only once, plus a re-read if the cached token stops
+/// working (expired/rotated). This was a real problem found during
+/// hardware testing: re-reading Keychain every poll trained the "Always
+/// Allow" grant to never stick, since it kept getting asked again.
+pub async fn poll_cached(
+    client: &reqwest::Client,
+    cached_token: &tokio::sync::Mutex<Option<String>>,
+) -> Result<UsageSnapshot> {
+    let existing = cached_token.lock().await.clone();
+
+    if let Some(token) = existing {
+        if let Ok(snapshot) = fetch_usage(client, &token).await {
+            return Ok(snapshot);
+        }
+        // Cached token might be stale/expired/rotated - fall through to a
+        // fresh read from the credential store.
+    }
+
+    let fresh = read_access_token()?;
+    let snapshot = fetch_usage(client, &fresh).await?;
+    *cached_token.lock().await = Some(fresh);
+    Ok(snapshot)
 }

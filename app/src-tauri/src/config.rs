@@ -16,14 +16,12 @@ pub enum Metric {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ButtonAssignment {
     pub metric: Metric,
-    pub icon_path: Option<String>,
 }
 
 impl Default for ButtonAssignment {
     fn default() -> Self {
         Self {
             metric: Metric::None,
-            icon_path: None,
         }
     }
 }
@@ -56,17 +54,13 @@ pub struct AppConfig {
     pub budget: BudgetConfig,
 }
 
-fn default_buttons() -> Vec<ButtonAssignment> {
-    vec![
-        ButtonAssignment {
-            metric: Metric::Session,
-            icon_path: None,
-        },
-        ButtonAssignment {
-            metric: Metric::Weekly,
-            icon_path: None,
-        },
-    ]
+/// No buttons assigned by default — the user picks explicitly which
+/// buttons (if any) Claude Deck should own, since it can't know which
+/// physical buttons are already in use by other software (e.g. AJAZZ
+/// Stream Dock). Exposed as `pub` so "reset to defaults" can get back
+/// here too.
+pub fn default_buttons() -> Vec<ButtonAssignment> {
+    Vec::new()
 }
 
 impl Default for AppConfig {

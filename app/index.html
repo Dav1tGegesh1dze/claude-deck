@@ -56,20 +56,24 @@
       </div>
 
       <h3>Button assignments</h3>
+      <div class="warning-box">
+        ⚠️ Before assigning a button below, make sure that same button is
+        set to <strong>empty / no action</strong> in AJAZZ's Stream Dock
+        (or whatever other control app you use) — otherwise that app will
+        keep overwriting Claude Deck's display every time you press it.
+        Claude Deck can't detect or override that from its side.
+      </div>
       <p class="hint">
-        Which metric each device button shows, and an optional custom icon
-        behind the gauge. Button 0/1 default to session/weekly.
+        Laid out to match the physical device: 2 rows of 3 screen buttons.
+        (The AKP03E also has 3 plain push-buttons and 3 knobs below these —
+        not shown here, they have no screen.) All buttons start at "none" —
+        pick which ones, if any, you want Claude Deck to use. Changes save
+        immediately.
       </p>
-      <table id="buttons-table">
-        <thead>
-          <tr>
-            <th>Button</th>
-            <th>Metric</th>
-            <th>Icon</th>
-          </tr>
-        </thead>
-        <tbody id="buttons-tbody"></tbody>
-      </table>
+      <div class="row">
+        <button id="reset-buttons-btn">Reset all to none</button>
+      </div>
+      <div id="buttons-grid" class="buttons-grid"></div>
 
       <hr />
 

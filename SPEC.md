@@ -19,7 +19,10 @@ actively running.
   countdown on physical device buttons, refreshed in the background.
 - **Zero-setup auth**: reuse the OAuth credentials Claude Code already stores
   locally after `claude login` — no separate login, no pasted API key.
-- Let the user **pick an icon/image per button** and assign a metric to it.
+- Let the user **assign which metric (or none) each screen button shows**,
+  with no buttons assigned by default — the user always opts in explicitly,
+  since Claude Deck can't know which physical buttons other software (e.g.
+  vendor control apps) is already using.
 - Support an optional **user-defined ("self-imposed") daily/monthly soft
   budget** on top of the real limits, since Anthropic doesn't expose those.
 - Ship as a **single downloadable installer** for macOS and Windows via
@@ -94,19 +97,34 @@ actively running.
 ## 6. Features (v1)
 
 ### 6.1 Live usage display
-- One button = session %, one button = weekly %. Each renders a generated
-  PNG (gauge/ring + percentage text + color state: green/yellow/red by
-  user-configured thresholds) pushed to the device.
-- Pressing a usage button shows the exact reset time (e.g. as a brief
-  overlay or by cycling the button face) rather than just the percentage.
+- Each of the AKP03E's 6 screen buttons can be independently assigned
+  session / weekly / self-imposed budget / none, laid out in the settings
+  UI to match the device's real 2-row-of-3 physical grid. **No buttons are
+  assigned by default** — see §6.2.
+- Each assigned button renders a generated PNG: a fill-bar gauge + a short
+  label ("5H"/"7D"/"BUD") + the percentage as text, colored by Anthropic's
+  own `severity` field (normal/warning/critical) rather than user-defined
+  thresholds — added after hardware testing showed identical-looking
+  buttons were impossible to tell apart.
+- Pressing a usage button showing the exact reset time (e.g. a brief
+  overlay) is **not implemented** — deferred, see ROADMAP.md Phase 3.
 
-### 6.2 Icon & button customization
-- Built-in icon set (simple bundled SVG/PNG set) plus user-uploaded custom
-  images per button.
-- Per-button assignment: which metric (session / weekly / self-imposed
-  budget) drives that button's content, independent of icon choice — icon
-  is the "frame," metric is the "data," so a user can reskin without losing
-  function.
+### 6.2 Button ownership, not customization
+- **Removed from scope** (was: built-in icon set + custom image upload per
+  button). Real hardware testing showed the harder problem wasn't
+  decoration, it was **ownership**: these HID button displays are
+  write-only (no readback), and if another app (e.g. AJAZZ's Stream Dock)
+  still manages a button, it actively repaints its own icon back over
+  Claude Deck's on interaction — there is no partial-override possible.
+  Given that, per-button custom icons added complexity without addressing
+  the actual problem users hit.
+- Because of this, **no button is assigned by default** — assigning one
+  is an explicit, deliberate choice, and the settings UI carries a
+  standing warning to first set that same button to blank/no-action in
+  any other control software before assigning it here.
+- A "reset all to none" action exists for quickly backing out of an
+  assignment (it cannot restore what another app had on the button —
+  nothing can, given the write-only display).
 
 ### 6.3 Self-imposed daily/monthly budget ("one-day limiter")
 - Since Anthropic doesn't expose real daily/monthly limits, this is an
@@ -122,8 +140,8 @@ actively running.
 ### 6.4 Host-side presence
 - Menu bar / system tray icon on the host OS mirroring the same two
   official numbers, for when the user isn't looking at the physical device.
-- Settings window: device selection, button↔metric mapping, icon picker,
-  refresh interval, threshold colors, soft-budget configuration.
+- Settings window: button↔metric mapping (grid matching the physical
+  device), refresh interval, soft-budget configuration.
 
 ## 7. Architecture
 
@@ -137,16 +155,16 @@ actively running.
     image push, button-press event stream.
   - `usage` module: OAuth-credential reader, poller, adapter around the
     `/api/oauth/usage` call, in-memory cache with staleness tracking.
-  - `render` module: turns a usage percentage + theme/icon into a PNG sized
+  - `render` module: turns a usage percentage + label into a PNG sized
     for the target button.
   - `budget` module: local soft-cap calculation for §6.3.
   - Tauri commands/events bridge state to the frontend.
-- **Frontend (web view)**: settings UI only (device/button/icon
-  configuration) — the physical device is the primary "display," the
-  desktop window is just for configuration and the tray fallback view.
-- **Storage**: local config file (JSON/TOML) under the OS app-data dir —
-  button↔metric↔icon mappings, refresh interval, threshold/budget settings.
-  No cloud sync, no telemetry.
+- **Frontend (web view)**: settings UI only (button/metric configuration)
+  — the physical device is the primary "display," the desktop window is
+  just for configuration and the tray fallback view.
+- **Storage**: local config file (JSON) under the OS app-data dir —
+  button↔metric mappings, refresh interval, budget settings. No cloud
+  sync, no telemetry.
 
 ## 8. Distribution
 

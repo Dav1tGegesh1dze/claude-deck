@@ -11,7 +11,6 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
-use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
 
 struct ConnectedDevice {
@@ -22,6 +21,10 @@ struct ConnectedDevice {
 struct AppState {
     latest_usage: Arc<Mutex<Option<usage::UsageSnapshot>>>,
     device: Arc<Mutex<Option<ConnectedDevice>>>,
+    /// Cached OAuth token so we don't re-touch the OS credential store
+    /// (macOS Keychain, which prompts) on every poll tick — see
+    /// usage::poll_cached.
+    cached_token: Arc<Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -37,7 +40,9 @@ async fn refresh_usage_now(
     state: tauri::State<'_, AppState>,
 ) -> Result<usage::UsageSnapshot, String> {
     let client = reqwest::Client::new();
-    let snapshot = usage::poll_once(&client).await.map_err(|e| e.to_string())?;
+    let snapshot = usage::poll_cached(&client, &state.cached_token)
+        .await
+        .map_err(|e| e.to_string())?;
     *state.latest_usage.lock().await = Some(snapshot.clone());
     apply_snapshot(&app, &snapshot).await;
     Ok(snapshot)
@@ -80,10 +85,15 @@ async fn set_button_metric(
     button_index: usize,
     metric: config::Metric,
 ) -> Result<(), String> {
-    let mut cfg = config::load(&app);
+    require_screen_button(button_index)?;
+    let old_cfg = config::load(&app);
+    let mut cfg = old_cfg.clone();
     ensure_button_slot(&mut cfg, button_index);
     cfg.buttons[button_index].metric = metric;
-    config::save(&app, &cfg).map_err(|e| e.to_string())
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    clear_released_buttons(&app, &old_cfg, &cfg).await;
+    push_now(&app).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -97,61 +107,96 @@ async fn set_budget_config(
         enabled,
         daily_cap_percent,
     };
-    config::save(&app, &cfg).map_err(|e| e.to_string())
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    push_now(&app).await;
+    Ok(())
 }
 
-/// Opens a native file picker, copies the chosen image into the app's
-/// config dir (so it survives the source file moving/being deleted), and
-/// assigns it as the icon for `button_index`. Returns the stored path, or
-/// `None` if the user cancelled.
+/// Resets every button back to `none` (nothing assigned), and actively
+/// blanks the screen on any button that was previously assigned — see
+/// clear_released_buttons. Cannot restore whatever image another app
+/// (e.g. AJAZZ's Stream Dock) had on a button before Claude Deck painted
+/// over it — these HID displays are write-only, there's no way to read
+/// back or recall a *previous* image, only blank the current one. The
+/// other app still has to repaint its own icon itself (switch
+/// pages/profiles in it, or unplug/replug the device).
 #[tauri::command]
-async fn pick_icon_for_button(
-    app: tauri::AppHandle,
-    button_index: usize,
-) -> Result<Option<String>, String> {
-    let dialog_app = app.clone();
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .add_filter("Images", &["png", "jpg", "jpeg"])
-            .blocking_pick_file()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
+    let old_cfg = config::load(&app);
+    let mut cfg = old_cfg.clone();
+    cfg.buttons = config::default_buttons();
+    config::save(&app, &cfg).map_err(|e| e.to_string())?;
+    clear_released_buttons(&app, &old_cfg, &cfg).await;
+    push_now(&app).await;
+    Ok(())
+}
 
-    let Some(picked) = picked else {
-        return Ok(None);
+/// For any screen button that was assigned a metric in `old` but is
+/// `none` in `new`, actively blanks that button's screen via
+/// `Device::clear_button_image` instead of just leaving the last-rendered
+/// gauge stuck there — "unassigning" a button should look unassigned.
+/// Best-effort: silently does nothing if no device is connected.
+async fn clear_released_buttons(
+    app: &tauri::AppHandle,
+    old: &config::AppConfig,
+    new: &config::AppConfig,
+) {
+    let state = app.state::<AppState>();
+    let guard = state.device.lock().await;
+    let Some(conn) = guard.as_ref() else {
+        return;
     };
 
-    let source = picked.into_path().map_err(|e| e.to_string())?;
-    let ext = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png");
+    let mut cleared_any = false;
 
-    let icons_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?
-        .join("icons");
-    std::fs::create_dir_all(&icons_dir).map_err(|e| e.to_string())?;
+    for i in 0..device::SCREEN_KEY_COUNT {
+        let was = old.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
+        let now = new.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
 
-    let dest = icons_dir.join(format!("button_{button_index}.{ext}"));
-    std::fs::copy(&source, &dest).map_err(|e| e.to_string())?;
-    let dest_str = dest.to_string_lossy().to_string();
+        if was != config::Metric::None && now == config::Metric::None {
+            if let Err(e) = conn.device.clear_button_image(i as u8).await {
+                log::error!("failed to clear button {i}: {e}");
+            } else {
+                cleared_any = true;
+            }
+        }
+    }
 
-    let mut cfg = config::load(&app);
-    ensure_button_slot(&mut cfg, button_index);
-    cfg.buttons[button_index].icon_path = Some(dest_str.clone());
-    config::save(&app, &cfg).map_err(|e| e.to_string())?;
-
-    Ok(Some(dest_str))
+    if cleared_any {
+        if let Err(e) = conn.device.flush().await {
+            log::error!("failed to flush after clearing buttons: {e}");
+        }
+    }
 }
 
 fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
     while cfg.buttons.len() <= index {
         cfg.buttons.push(config::ButtonAssignment::default());
+    }
+}
+
+/// Buttons 6/7/8 on the AKP03 family have no screen (SCREEN_KEY_COUNT=6) —
+/// reject assigning them here too, not just at push time, so a bad index
+/// fails loudly instead of just silently never showing anything.
+fn require_screen_button(index: usize) -> Result<(), String> {
+    if index >= device::SCREEN_KEY_COUNT {
+        return Err(format!(
+            "button {index} has no screen (only buttons 0-{} do)",
+            device::SCREEN_KEY_COUNT - 1
+        ));
+    }
+    Ok(())
+}
+
+/// Re-pushes the last known usage snapshot to the device immediately,
+/// instead of making the user wait for the next poll tick (up to
+/// `refresh_interval_secs`) to see a settings change take effect. No-op if
+/// no snapshot has been fetched yet.
+async fn push_now(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let snapshot = state.latest_usage.lock().await.clone();
+    if let Some(snapshot) = snapshot {
+        apply_snapshot(app, &snapshot).await;
     }
 }
 
@@ -196,6 +241,18 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
     }
 }
 
+/// Short label shown above the percentage so buttons showing different
+/// metrics are visually distinguishable (hardware testing showed this was
+/// missing — session/weekly looked identical at a glance).
+fn metric_label(metric: config::Metric) -> &'static str {
+    match metric {
+        config::Metric::Session => "5H",
+        config::Metric::Weekly => "7D",
+        config::Metric::Budget => "BUD",
+        config::Metric::None => "",
+    }
+}
+
 async fn push_snapshot_to_device(
     app: &tauri::AppHandle,
     conn: &ConnectedDevice,
@@ -207,31 +264,31 @@ async fn push_snapshot_to_device(
     let weekly_percent = weekly.map(|l| l.percent).unwrap_or(0.0);
 
     for (index, assignment) in cfg.buttons.iter().enumerate() {
-        if index >= device::KEY_COUNT {
-            break;
+        if index >= device::SCREEN_KEY_COUNT {
+            break; // buttons past this have no screen - nothing to push
+        }
+
+        let label = metric_label(assignment.metric);
+
+        // Budget assigned but tracking disabled: show a clear "off" state
+        // instead of silently pushing nothing, which just looked broken.
+        if assignment.metric == config::Metric::Budget && !cfg.budget.enabled {
+            let image = render::render_disabled(label, w as u32, h as u32);
+            device::push_image(&conn.device, conn.kind, index as u8, image).await?;
+            continue;
         }
 
         let entry: Option<usage::LimitEntry> = match assignment.metric {
             config::Metric::Session => session.cloned(),
             config::Metric::Weekly => weekly.cloned(),
-            config::Metric::Budget if cfg.budget.enabled => {
-                Some(budget::compute(app, &cfg.budget, weekly_percent))
-            }
-            config::Metric::Budget | config::Metric::None => None,
+            config::Metric::Budget => Some(budget::compute(app, &cfg.budget, weekly_percent)),
+            config::Metric::None => None,
         };
 
         let Some(entry) = entry else { continue };
 
-        let image = match &assignment.icon_path {
-            Some(path) => render::render_percent_on_background(
-                std::path::Path::new(path),
-                entry.percent,
-                &entry.severity,
-                w as u32,
-                h as u32,
-            )?,
-            None => render::render_percent(entry.percent, &entry.severity, w as u32, h as u32),
-        };
+        let image =
+            render::render_percent(label, entry.percent, &entry.severity, w as u32, h as u32);
 
         device::push_image(&conn.device, conn.kind, index as u8, image).await?;
     }
@@ -258,7 +315,9 @@ fn update_tray_tooltip(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot) 
 
 fn spawn_usage_poller(app: &tauri::AppHandle) {
     let app = app.clone();
-    let latest_usage = app.state::<AppState>().latest_usage.clone();
+    let state = app.state::<AppState>();
+    let latest_usage = state.latest_usage.clone();
+    let cached_token = state.cached_token.clone();
 
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::new();
@@ -270,7 +329,7 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
         loop {
             interval.tick().await;
 
-            match usage::poll_once(&client).await {
+            match usage::poll_cached(&client, &cached_token).await {
                 Ok(snapshot) => {
                     *latest_usage.lock().await = Some(snapshot.clone());
                     let _ = app.emit("usage://updated", &snapshot);
@@ -289,7 +348,6 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -298,6 +356,7 @@ pub fn run() {
         .manage(AppState {
             latest_usage: Arc::new(Mutex::new(None)),
             device: Arc::new(Mutex::new(None)),
+            cached_token: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             get_usage_snapshot,
@@ -309,7 +368,7 @@ pub fn run() {
             get_config,
             set_button_metric,
             set_budget_config,
-            pick_icon_for_button,
+            reset_button_assignments,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -330,10 +389,11 @@ pub fn run() {
             // Fetch once immediately on startup so the UI (and device, and
             // tray) have data without waiting for the first interval tick.
             let startup_state = handle.state::<AppState>().latest_usage.clone();
+            let startup_token = handle.state::<AppState>().cached_token.clone();
             let startup_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 let client = reqwest::Client::new();
-                match usage::poll_once(&client).await {
+                match usage::poll_cached(&client, &startup_token).await {
                     Ok(snapshot) => {
                         *startup_state.lock().await = Some(snapshot.clone());
                         let _ = startup_handle.emit("usage://updated", &snapshot);

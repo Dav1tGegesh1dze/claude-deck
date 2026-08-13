@@ -26,7 +26,6 @@ type Metric = "session" | "weekly" | "budget" | "none";
 
 interface ButtonAssignment {
   metric: Metric;
-  icon_path: string | null;
 }
 
 interface BudgetConfig {
@@ -40,8 +39,11 @@ interface AppConfig {
   budget: BudgetConfig;
 }
 
-// Matches device::KEY_COUNT in the Rust backend (AKP03-family: 9 buttons).
-const DEVICE_KEY_COUNT = 9;
+// Matches device::SCREEN_KEY_COUNT in the Rust backend. The AKP03-family
+// device has 9 physical buttons total, but only the first 6 have a screen
+// (the other 3 are plain push-buttons) - those 6 are all that's
+// configurable here.
+const SCREEN_KEY_COUNT = 6;
 
 let lastFetchedAt: string | null = null;
 
@@ -148,12 +150,6 @@ async function readButtonEvents() {
   }
 }
 
-function iconLabel(path: string | null): string {
-  if (!path) return "none";
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
-
 async function loadSettings() {
   const cfg = await invoke<AppConfig>("get_config");
 
@@ -165,25 +161,45 @@ async function loadSettings() {
   if (budgetEnabled) budgetEnabled.checked = cfg.budget.enabled;
   if (budgetCap) budgetCap.value = String(cfg.budget.daily_cap_percent);
 
-  renderButtonsTable(cfg.buttons);
+  renderButtonsGrid(cfg.buttons);
 }
 
-function renderButtonsTable(buttons: ButtonAssignment[]) {
-  const tbody = document.querySelector<HTMLElement>("#buttons-tbody");
-  if (!tbody) return;
+function flashSaved(el: HTMLElement) {
+  el.textContent = "Saved ✓";
+  el.classList.add("saved-flash");
+  window.setTimeout(() => {
+    el.textContent = "";
+    el.classList.remove("saved-flash");
+  }, 1500);
+}
 
-  tbody.innerHTML = "";
+// Physical layout confirmed against a real AKP03E: 2 rows of 3 screen
+// buttons, left to right, top to bottom - button index order already
+// matches this reading order, so a 3-column CSS grid over indices 0..5 in
+// sequence reproduces the device layout directly.
+const GRID_COLUMNS = 3;
 
-  for (let i = 0; i < DEVICE_KEY_COUNT; i++) {
-    const assignment: ButtonAssignment = buttons[i] ?? { metric: "none", icon_path: null };
+function renderButtonsGrid(buttons: ButtonAssignment[]) {
+  const grid = document.querySelector<HTMLElement>("#buttons-grid");
+  if (!grid) return;
 
-    const row = document.createElement("tr");
+  grid.innerHTML = "";
+  grid.style.gridTemplateColumns = `repeat(${GRID_COLUMNS}, 1fr)`;
 
-    const indexCell = document.createElement("td");
-    indexCell.textContent = String(i);
-    row.appendChild(indexCell);
+  for (let i = 0; i < SCREEN_KEY_COUNT; i++) {
+    const assignment: ButtonAssignment = buttons[i] ?? { metric: "none" };
 
-    const metricCell = document.createElement("td");
+    const card = document.createElement("div");
+    card.className = "button-card";
+
+    const title = document.createElement("div");
+    title.className = "button-card-title";
+    title.textContent = `Button ${i}`;
+    card.appendChild(title);
+
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "status-flash";
+
     const select = document.createElement("select");
     for (const option of ["session", "weekly", "budget", "none"] as Metric[]) {
       const opt = document.createElement("option");
@@ -197,25 +213,12 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
         buttonIndex: i,
         metric: select.value as Metric,
       });
+      flashSaved(statusSpan);
     });
-    metricCell.appendChild(select);
-    row.appendChild(metricCell);
+    card.appendChild(select);
+    card.appendChild(statusSpan);
 
-    const iconCell = document.createElement("td");
-    const iconLabelSpan = document.createElement("span");
-    iconLabelSpan.textContent = iconLabel(assignment.icon_path);
-    iconLabelSpan.className = "icon-label";
-    const iconBtn = document.createElement("button");
-    iconBtn.textContent = "Choose icon…";
-    iconBtn.addEventListener("click", async () => {
-      const path = await invoke<string | null>("pick_icon_for_button", { buttonIndex: i });
-      if (path) iconLabelSpan.textContent = iconLabel(path);
-    });
-    iconCell.appendChild(iconBtn);
-    iconCell.appendChild(iconLabelSpan);
-    row.appendChild(iconCell);
-
-    tbody.appendChild(row);
+    grid.appendChild(card);
   }
 }
 
@@ -231,6 +234,18 @@ async function saveBudget() {
   await invoke("set_budget_config", { enabled, dailyCapPercent: cap });
 }
 
+async function resetButtons() {
+  const confirmed = confirm(
+    "Reset all buttons to \"none\"? Any button Claude Deck currently owns " +
+      "will be blanked. This can't restore whatever another app had on " +
+      "it before Claude Deck painted over it - that app has to repaint " +
+      "its own icon itself.",
+  );
+  if (!confirmed) return;
+  await invoke("reset_button_assignments");
+  await loadSettings();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#refresh-btn")?.addEventListener("click", refreshNow);
   document.querySelector("#list-devices-btn")?.addEventListener("click", listDevices);
@@ -240,6 +255,7 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector("#save-refresh-interval-btn")
     ?.addEventListener("click", saveRefreshInterval);
   document.querySelector("#save-budget-btn")?.addEventListener("click", saveBudget);
+  document.querySelector("#reset-buttons-btn")?.addEventListener("click", resetButtons);
 
   loadCached();
   loadSettings();

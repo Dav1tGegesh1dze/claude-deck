@@ -16,7 +16,15 @@ use mirajazz::{
 };
 use serde::Serialize;
 
+/// Total physical buttons (6 with an LCD screen + 3 plain push-buttons),
+/// needed by `Device::connect` for correctly sized button-state tracking.
 pub const KEY_COUNT: usize = 9;
+/// Of those, only the first 6 (indices 0-5) have a screen and can show an
+/// image — confirmed against a real AKP03E. Buttons 6/7/8 are plain
+/// push-buttons; pushing an image to them is meaningless, so anything
+/// that assigns metrics to buttons should stop at this count, not
+/// `KEY_COUNT`.
+pub const SCREEN_KEY_COUNT: usize = 6;
 pub const ENCODER_COUNT: usize = 3;
 
 const AJAZZ_VID: u16 = 0x0300;
