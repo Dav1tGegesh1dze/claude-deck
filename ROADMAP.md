@@ -7,18 +7,22 @@ Each phase should end in something runnable/demoable, not just code. See
 
 Goal: prove the two riskiest assumptions before investing in the app shell.
 
-- [ ] Install Rust toolchain + `cargo tauri` CLI (not present on this
-      machine yet — Node 26 and Xcode CLT already are).
+- [x] Install Rust toolchain + `cargo tauri` CLI.
 - [ ] Hardware spike: standalone Rust binary using `mirajazz` that connects
       to the AKP03E, pushes a static test PNG to one button, and logs button
       press events to stdout. No UI, no polling — just "can we talk to the
-      device at all."
-- [ ] Data spike: standalone script that reads `~/.claude/.credentials.json`
-      and calls `https://api.anthropic.com/api/oauth/usage`, printing raw
-      `five_hour` / `seven_day` JSON. Confirms the endpoint works for this
-      account and what the real payload shape is (field names may drift
-      from what's documented in community tools).
-- [ ] Write down actual findings from both spikes (payload shape, any auth
+      device at all." **Blocked on hardware access, not scope** — no AKP03E
+      has been connected to the dev machine yet. Not treated as a hard
+      blocker for Phase 1+: the `device` module will be written against
+      `mirajazz`'s API and compiled, but left unverified against real
+      hardware until the device is available. Revisit before Phase 5
+      release.
+- [x] Data spike: confirmed working against a real account. See
+      [docs/phase-0-findings.md](docs/phase-0-findings.md) for the payload
+      shape and the corrected (platform-dependent) credential-storage
+      details — this superseded the `~/.claude/.credentials.json`-only
+      assumption below.
+- [x] Write down actual findings from both spikes (payload shape, any auth
       quirks, device response latency) — these will likely correct details
       in SPEC.md §4/§5.
 

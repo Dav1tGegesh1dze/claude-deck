@@ -62,13 +62,21 @@ actively running.
 
 - **Primary source**: the same undocumented endpoint Claude Code's own
   statusline integration and community tools (`claude-code-statusline`,
-  `claude-usage-widget`) already use — `https://api.anthropic.com/api/oauth/usage`.
-  It returns `five_hour` and `seven_day` quota utilization as percentages
-  with ISO-8601 reset timestamps.
-- **Credentials**: read the OAuth token Claude Code caches at
-  `~/.claude/.credentials.json` after the user runs `claude login`. If that
-  file is missing, the app shows a clear "run `claude login` first" state —
-  it never prompts for a separate login or API key.
+  `claude-usage-widget`) already use — `https://api.anthropic.com/api/oauth/usage`,
+  called with `Authorization: Bearer <accessToken>` and
+  `anthropic-beta: oauth-2025-04-20` (confirmed working in Phase 0). The
+  response includes a `limits[]` array (`kind`, `percent`, `severity`,
+  `resets_at`, `is_active`) — parse this rather than the flatter
+  `five_hour`/`seven_day` fields, and use Anthropic's own `severity` as the
+  default color state rather than inventing our own thresholds.
+- **Credentials**: read the OAuth token Claude Code already caches locally
+  after `claude login`. This is **platform-dependent** (confirmed in Phase 0
+  — see [docs/phase-0-findings.md](docs/phase-0-findings.md)): on macOS it's
+  the Keychain (service `Claude Code-credentials`, account = OS username),
+  not a file; `~/.claude/.credentials.json` is presumed for Linux/Windows
+  but not yet verified. If no credential is found, the app shows a clear
+  "run `claude login` first" state — it never prompts for a separate login
+  or API key.
 - **Polling**: background poll on an interval (default 5 min, user
   configurable, minimum floor to avoid hammering an undocumented endpoint —
   treat this as a scarce/fragile resource, not a normal API).
