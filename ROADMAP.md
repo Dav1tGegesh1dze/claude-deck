@@ -116,13 +116,23 @@ accurate session/weekly usage with no manual steps beyond `claude login`.
 layouts, icons, and budget settings. OS notifications and press-to-reveal
 still open.
 
-## Phase 4 — Multi-device support & robustness
+## Phase 4 — Multi-device support & robustness (2026-08-13)
 
-- [ ] Generalize `device` module using `mirajazz`'s protocol-version
-      abstraction; test against at least one non-AKP03E device if
-      available, otherwise document as best-effort/untested.
-- [ ] Reconnect handling (device unplugged/replugged mid-session).
-- [ ] Basic structured logging for troubleshooting reports from other users.
+- [x] `device` module already generalized via `mirajazz`'s VID/PID +
+      protocol-version table since Phase 1 (covers AKP03/AKP03E/AKP03R +
+      rev.2 variants + Mirabox N3 6602/6603) — nothing new needed here.
+      Still **untested against any non-AKP03E device**, and untested
+      against AKP03E itself (no hardware connected during development).
+- [x] Reconnect handling already exists since Phase 2: `apply_snapshot`
+      clears the held device connection on any push failure, so the next
+      poll tick attempts `connect_first()` again. Lightweight (poll-interval
+      granularity, not event-driven), but functional. A faster
+      `DeviceWatcher`-based reconnect is a possible future improvement, not
+      needed for v1.
+- [x] Structured logging: `tauri-plugin-log`, all `println!`/`eprintln!`
+      replaced with `log::info!`/`log::error!`. Logs to stdout in dev and
+      the OS log dir in production, so a user reporting an issue has a real
+      file to share.
 
 ## Phase 5 — Public distribution
 

@@ -177,7 +177,7 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
     if guard.is_none() {
         match device::connect_first().await {
             Ok((device, kind)) => {
-                println!("Connected to device: {}", kind.human_name());
+                log::info!("Connected to device: {}", kind.human_name());
                 *guard = Some(ConnectedDevice { device, kind });
             }
             Err(_) => return, // no supported device plugged in right now
@@ -191,7 +191,7 @@ async fn apply_snapshot(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot)
     };
 
     if let Err(e) = push_result {
-        eprintln!("failed to push usage to device, will reconnect next poll: {e:#}");
+        log::error!("failed to push usage to device, will reconnect next poll: {e:#}");
         *guard = None;
     }
 }
@@ -277,7 +277,7 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
                     apply_snapshot(&app, &snapshot).await;
                 }
                 Err(err) => {
-                    eprintln!("usage poll failed: {err:#}");
+                    log::error!("usage poll failed: {err:#}");
                     let _ = app.emit("usage://error", err.to_string());
                 }
             }
@@ -290,6 +290,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .manage(AppState {
             latest_usage: Arc::new(Mutex::new(None)),
             device: Arc::new(Mutex::new(None)),
@@ -335,7 +340,7 @@ pub fn run() {
                         apply_snapshot(&startup_handle, &snapshot).await;
                     }
                     Err(err) => {
-                        eprintln!("initial usage poll failed: {err:#}");
+                        log::error!("initial usage poll failed: {err:#}");
                         let _ = startup_handle.emit("usage://error", err.to_string());
                     }
                 }
