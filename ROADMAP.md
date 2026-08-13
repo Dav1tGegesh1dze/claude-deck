@@ -29,18 +29,34 @@ Goal: prove the two riskiest assumptions before investing in the app shell.
 **Exit criteria**: a button on the physical device shows a hardcoded image,
 and a terminal prints real session/weekly percentages for your account.
 
-## Phase 1 — App skeleton
+## Phase 1 — App skeleton (done, 2026-08-13)
 
-- [ ] `cargo tauri init` project structure; minimal window that opens.
-- [ ] Port the Phase 0 device spike into a `device` module + Tauri command.
-- [ ] Port the Phase 0 data spike into a `usage` module with interval
-      polling (default 5 min) and a Tauri event emitting fresh data to the
-      frontend.
-- [ ] Local config file read/write (device selection, refresh interval).
+- [x] `npm create tauri-app` project structure (vanilla-ts + Rust), lives in
+      `app/`; minimal window opens, smoke-tested (launched, stayed alive,
+      no crash, clean build with zero warnings).
+- [x] `device` module (`app/src-tauri/src/device.rs`): VID/PID table for
+      the AKP03 family, `connect`, `push_test_pattern`, `read_events_once`,
+      all wired as Tauri commands. **Written against mirajazz 0.16.2's real
+      API (verified via clean compile), not yet run against physical
+      hardware** — still blocked on the AKP03E being connected.
+- [x] `usage` module (`app/src-tauri/src/usage.rs`): reads the Keychain
+      token, polls the usage endpoint every `refresh_interval_secs`
+      (default 300s), emits `usage://updated` / `usage://error` events.
+      Runs an immediate poll on startup too.
+- [x] Local config file read/write (`app/src-tauri/src/config.rs`) — JSON
+      under the OS app-config dir. `refresh_interval_secs` only for now;
+      device selection deferred to Phase 3 (multiple devices aren't
+      supported yet anyway).
+- [x] Went slightly further than "bare-bones log": the frontend
+      (`app/index.html`, `app/src/main.ts`) already renders session/weekly
+      % + severity + reset time as real UI, plus manual spike-test buttons
+      (list devices / push test image / read button events) — this
+      overlaps a bit with Phase 2 but cost little extra once the Tauri
+      event wiring existed.
 
-**Exit criteria**: launching the app auto-connects to the AKP03E and starts
-polling usage in the background, visible in a bare-bones dev-tools log —
-nothing on the device screen yet.
+**Exit criteria met**: launching the app polls usage in the background and
+shows it in a real window. Device-side exit criteria ("button shows a
+hardcoded image") still pending real hardware.
 
 ## Phase 2 — Live usage display (the core feature)
 
