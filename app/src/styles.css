@@ -175,6 +175,16 @@ td {
   font-size: 0.85em;
 }
 
+.status-flash {
+  font-size: 0.85em;
+  color: #888;
+}
+
+.status-flash.saved-flash {
+  color: #2e9e4c;
+  font-weight: 600;
+}
+
 #device-output {
   text-align: left;
   background: #00000011;

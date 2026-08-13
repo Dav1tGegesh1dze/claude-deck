@@ -86,6 +86,7 @@ async fn set_button_metric(
     button_index: usize,
     metric: config::Metric,
 ) -> Result<(), String> {
+    require_screen_button(button_index)?;
     let mut cfg = config::load(&app);
     ensure_button_slot(&mut cfg, button_index);
     cfg.buttons[button_index].metric = metric;
@@ -119,6 +120,7 @@ async fn pick_icon_for_button(
     app: tauri::AppHandle,
     button_index: usize,
 ) -> Result<Option<String>, String> {
+    require_screen_button(button_index)?;
     let dialog_app = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         dialog_app
@@ -180,6 +182,19 @@ fn ensure_button_slot(cfg: &mut config::AppConfig, index: usize) {
     while cfg.buttons.len() <= index {
         cfg.buttons.push(config::ButtonAssignment::default());
     }
+}
+
+/// Buttons 6/7/8 on the AKP03 family have no screen (SCREEN_KEY_COUNT=6) —
+/// reject assigning them here too, not just at push time, so a bad index
+/// fails loudly instead of just silently never showing anything.
+fn require_screen_button(index: usize) -> Result<(), String> {
+    if index >= device::SCREEN_KEY_COUNT {
+        return Err(format!(
+            "button {index} has no screen (only buttons 0-{} do)",
+            device::SCREEN_KEY_COUNT - 1
+        ));
+    }
+    Ok(())
 }
 
 /// Re-pushes the last known usage snapshot to the device immediately,
@@ -258,8 +273,8 @@ async fn push_snapshot_to_device(
     let weekly_percent = weekly.map(|l| l.percent).unwrap_or(0.0);
 
     for (index, assignment) in cfg.buttons.iter().enumerate() {
-        if index >= device::KEY_COUNT {
-            break;
+        if index >= device::SCREEN_KEY_COUNT {
+            break; // buttons past this have no screen - nothing to push
         }
 
         let label = metric_label(assignment.metric);

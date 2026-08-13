@@ -53,20 +53,32 @@ both own the same physical device's button actions at once.
 
 ### Only assign the buttons you want to give up
 
-In Settings → Button assignments, leave every button you want a *different*
-app (vendor software, or nothing) to control set to `none` — Claude Deck
-skips those entirely. Only assign `session`/`weekly`/`budget` to buttons you
-want dedicated to it.
+The AKP03E has 9 physical buttons but only **6 have a screen** (2 rows of
+3) — the other 3 are plain push-buttons and aren't shown in Claude Deck's
+settings, since there's nowhere to display anything on them.
 
-These button displays are **write-only**: there is no API to read back
-what's currently on a button, so Claude Deck has no way to detect "has this
-button already been configured by something else," and no way to restore a
-button's previous image once it's painted over it. If you accidentally let
-Claude Deck take over a button another app was using, use **Settings →
-Reset to defaults** to stop Claude Deck from repainting it going forward,
-then get the other app to redraw its own image (switch pages/profiles in
-it, or unplug/replug the device — most vendor software repaints its whole
-grid on reconnect).
+In Settings → Button assignments, leave every screen button you want a
+*different* app (vendor software, or nothing) to control set to `none` —
+Claude Deck skips those entirely.
+
+**Confirmed on real hardware**: it's not enough to just leave a button
+alone in Stream Dock and expect Claude Deck's image to stick — Stream Dock
+actively repaints its own icon back onto a button when you interact with
+it, if it still considers itself in charge of that button. So for any
+button you want Claude Deck to own: set it to blank/no action in Stream
+Dock, or quit Stream Dock entirely while running Claude Deck. There's no
+partial-override option — a button is either Stream Dock's or Claude
+Deck's, not both.
+
+These button displays are also **write-only**: there is no API to read
+back what's currently on a button, so Claude Deck has no way to detect
+"has this button already been configured by something else," and no way
+to restore a button's previous image once it's painted over it. If you
+accidentally let Claude Deck take over a button another app was using, use
+**Settings → Reset to defaults** to stop Claude Deck from repainting it
+going forward, then get the other app to redraw its own image (switch
+pages/profiles in it, or unplug/replug the device — most vendor software
+repaints its whole grid on reconnect).
 
 ## Development
 

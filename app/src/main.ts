@@ -40,8 +40,11 @@ interface AppConfig {
   budget: BudgetConfig;
 }
 
-// Matches device::KEY_COUNT in the Rust backend (AKP03-family: 9 buttons).
-const DEVICE_KEY_COUNT = 9;
+// Matches device::SCREEN_KEY_COUNT in the Rust backend. The AKP03-family
+// device has 9 physical buttons total, but only the first 6 have a screen
+// (the other 3 are plain push-buttons) - those 6 are all that's
+// configurable here.
+const SCREEN_KEY_COUNT = 6;
 
 let lastFetchedAt: string | null = null;
 
@@ -168,13 +171,22 @@ async function loadSettings() {
   renderButtonsTable(cfg.buttons);
 }
 
+function flashSaved(el: HTMLElement) {
+  el.textContent = "Saved ✓";
+  el.classList.add("saved-flash");
+  window.setTimeout(() => {
+    el.textContent = "";
+    el.classList.remove("saved-flash");
+  }, 1500);
+}
+
 function renderButtonsTable(buttons: ButtonAssignment[]) {
   const tbody = document.querySelector<HTMLElement>("#buttons-tbody");
   if (!tbody) return;
 
   tbody.innerHTML = "";
 
-  for (let i = 0; i < DEVICE_KEY_COUNT; i++) {
+  for (let i = 0; i < SCREEN_KEY_COUNT; i++) {
     const assignment: ButtonAssignment = buttons[i] ?? { metric: "none", icon_path: null };
 
     const row = document.createElement("tr");
@@ -182,6 +194,9 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
     const indexCell = document.createElement("td");
     indexCell.textContent = String(i);
     row.appendChild(indexCell);
+
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "status-flash";
 
     const metricCell = document.createElement("td");
     const select = document.createElement("select");
@@ -197,6 +212,7 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
         buttonIndex: i,
         metric: select.value as Metric,
       });
+      flashSaved(statusSpan);
     });
     metricCell.appendChild(select);
     row.appendChild(metricCell);
@@ -209,11 +225,18 @@ function renderButtonsTable(buttons: ButtonAssignment[]) {
     iconBtn.textContent = "Choose icon…";
     iconBtn.addEventListener("click", async () => {
       const path = await invoke<string | null>("pick_icon_for_button", { buttonIndex: i });
-      if (path) iconLabelSpan.textContent = iconLabel(path);
+      if (path) {
+        iconLabelSpan.textContent = iconLabel(path);
+        flashSaved(statusSpan);
+      }
     });
     iconCell.appendChild(iconBtn);
     iconCell.appendChild(iconLabelSpan);
     row.appendChild(iconCell);
+
+    const statusCell = document.createElement("td");
+    statusCell.appendChild(statusSpan);
+    row.appendChild(statusCell);
 
     tbody.appendChild(row);
   }
