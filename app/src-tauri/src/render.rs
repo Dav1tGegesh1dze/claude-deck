@@ -6,9 +6,11 @@
 //! rendered at its default instance.
 
 use ab_glyph::{FontArc, PxScale};
-use image::{DynamicImage, Rgb, RgbImage};
+use anyhow::{anyhow, Result};
+use image::{imageops::FilterType, DynamicImage, Rgb, RgbImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
+use std::path::Path;
 use std::sync::LazyLock;
 
 static FONT_BYTES: &[u8] = include_bytes!("../assets/Roboto-Variable.ttf");
@@ -28,12 +30,8 @@ fn severity_color(severity: &str) -> Rgb<u8> {
 const BACKGROUND: Rgb<u8> = Rgb([20, 20, 20]);
 const TEXT_COLOR: Rgb<u8> = Rgb([255, 255, 255]);
 
-/// Renders a percentage + severity as a button image. `width`/`height`
-/// should come from the target device's `ImageFormat::size` — mirajazz
-/// resizes on send regardless, but rendering close to native size keeps
-/// the small text legible.
-pub fn render_percent(percent: f64, severity: &str, width: u32, height: u32) -> DynamicImage {
-    let mut img = RgbImage::from_pixel(width, height, BACKGROUND);
+fn render_on(mut img: RgbImage, percent: f64, severity: &str) -> DynamicImage {
+    let (width, height) = img.dimensions();
 
     let percent = percent.clamp(0.0, 100.0);
     let fill_height = ((percent / 100.0) * height as f64).round() as i32;
@@ -58,6 +56,31 @@ pub fn render_percent(percent: f64, severity: &str, width: u32, height: u32) -> 
     draw_text_mut(&mut img, TEXT_COLOR, x, y, scale, &*FONT, &label);
 
     DynamicImage::ImageRgb8(img)
+}
+
+/// Renders a percentage + severity as a button image on a solid
+/// background. `width`/`height` should come from the target device's
+/// `ImageFormat::size` — mirajazz resizes on send regardless, but
+/// rendering close to native size keeps the small text legible.
+pub fn render_percent(percent: f64, severity: &str, width: u32, height: u32) -> DynamicImage {
+    render_on(RgbImage::from_pixel(width, height, BACKGROUND), percent, severity)
+}
+
+/// Same as [render_percent], but drawn over a user-supplied custom icon
+/// image instead of a solid background (SPEC.md §6.2).
+pub fn render_percent_on_background(
+    background_path: &Path,
+    percent: f64,
+    severity: &str,
+    width: u32,
+    height: u32,
+) -> Result<DynamicImage> {
+    let base = image::open(background_path)
+        .map_err(|e| anyhow!("failed to load icon image {}: {e}", background_path.display()))?
+        .resize_exact(width, height, FilterType::Lanczos3)
+        .into_rgb8();
+
+    Ok(render_on(base, percent, severity))
 }
 
 #[cfg(test)]
