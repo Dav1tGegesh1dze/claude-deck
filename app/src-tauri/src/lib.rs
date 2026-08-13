@@ -313,6 +313,13 @@ fn update_tray_tooltip(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot) 
     }
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn spawn_usage_poller(app: &tauri::AppHandle) {
     let app = app.clone();
     let state = app.state::<AppState>();
@@ -373,18 +380,35 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            let show_item = MenuItem::with_id(app, "show", "Show Claude Deck", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .tooltip("Claude Deck")
-                .on_menu_event(|app, event| {
-                    if event.id() == "quit" {
-                        app.exit(0);
-                    }
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "quit" => app.exit(0),
+                    "show" => show_main_window(app),
+                    _ => {}
                 })
                 .build(app)?;
+
+            // Closing the window should not quit the app - the whole point
+            // is that it keeps polling and updating the physical device in
+            // the background (found missing during hardware testing: the
+            // display just froze on close because the process was exiting
+            // and killing the poller with it). Hide instead; "Quit" in the
+            // tray menu is the only way to actually exit.
+            if let Some(window) = app.get_webview_window("main") {
+                let window_to_hide = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window_to_hide.hide();
+                    }
+                });
+            }
 
             // Fetch once immediately on startup so the UI (and device, and
             // tray) have data without waiting for the first interval tick.
@@ -410,6 +434,13 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS: clicking the Dock icon while the window is hidden
+            // should bring it back, matching normal Mac app behavior.
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_main_window(app_handle);
+            }
+        });
 }
