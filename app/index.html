@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Deck</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <h1>Claude Deck</h1>
+      <p class="subtitle">Live Claude Code session &amp; weekly usage</p>
+
+      <div class="row" id="usage-cards">
+        <section class="card" id="session-card">
+          <h2>Session (5h)</h2>
+          <div class="percent" id="session-percent">—</div>
+          <div class="severity" id="session-severity"></div>
+          <div class="resets" id="session-resets"></div>
+        </section>
+
+        <section class="card" id="weekly-card">
+          <h2>Weekly (7d)</h2>
+          <div class="percent" id="weekly-percent">—</div>
+          <div class="severity" id="weekly-severity"></div>
+          <div class="resets" id="weekly-resets"></div>
+        </section>
+      </div>
+
+      <p class="status" id="status-line">Loading…</p>
+
+      <div class="row">
+        <button id="refresh-btn">Refresh now</button>
+      </div>
+
+      <hr />
+
+      <h2>Device (Phase 0/1 spike controls)</h2>
+      <div class="row">
+        <button id="list-devices-btn">List devices</button>
+        <button id="push-test-btn">Push test image</button>
+        <button id="read-events-btn">Read button events (5s)</button>
+      </div>
+      <pre id="device-output"></pre>
+    </main>
+  </body>
+</html>
