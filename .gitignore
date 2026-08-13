@@ -1,0 +1,16 @@
+# Rust
+/target
+
+# Node
+node_modules/
+dist/
+
+# Tauri
+/src-tauri/target
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
