@@ -58,22 +58,43 @@ and a terminal prints real session/weekly percentages for your account.
 shows it in a real window. Device-side exit criteria ("button shows a
 hardcoded image") still pending real hardware.
 
-## Phase 2 — Live usage display (the core feature)
+## Phase 2 — Live usage display (the core feature) (done, 2026-08-13)
 
-- [ ] `render` module: percentage + gauge → PNG sized for the button.
-- [ ] Wire session % to button 1, weekly % to button 2, refreshed on each
-      poll tick.
-- [ ] Color thresholds (green/yellow/red), user-configurable in settings UI.
-- [ ] Press-to-reveal reset time on a usage button.
-- [ ] Host OS tray icon mirroring the same two numbers.
-- [ ] Graceful degradation: "stale since HH:MM" state if polling fails or
-      credentials are missing, instead of crashing or showing 0%.
+- [x] `render` module (`app/src-tauri/src/render.rs`): percentage → fill-bar
+      gauge + centered percentage text, PNG sized for the button. Uses a
+      bundled Roboto variable font (OFL license, see
+      `app/src-tauri/assets/Roboto-OFL.txt`). Unit-tested (size, fill
+      behavior, out-of-range clamping) — no hardware needed to verify this
+      part.
+- [x] Wire session % to button 0, weekly % to button 1, refreshed on each
+      poll tick and on manual refresh. Device connects lazily/best-effort:
+      if no supported device is plugged in, the app just skips the device
+      push and keeps working via its own window + tray — this is the
+      graceful-degradation behavior for "no device" as well as "poll
+      failed". **Still hardware-unverified** (see Phase 0/1 notes).
+- [x] Color: uses Anthropic's own `severity` field directly (normal/
+      warning/critical → green/amber/red) per SPEC.md §5, rather than
+      user thresholds. User-configurable overrides are still a Phase 3 item.
+- [x] Host OS tray icon (`tauri::tray`) mirroring session/weekly %, updated
+      on every poll; has a Quit menu item.
+- [x] Graceful degradation: frontend now shows "Stale since HH:MM — <error>"
+      on a failed poll instead of blanking the numbers (`app/src/main.ts`).
+- **Deferred to Phase 3**: press-to-reveal reset time on a button press.
+  Reason: this needs a continuous background button-reader holding the
+  device's one-reader-at-a-time slot, which would conflict with the
+  Phase 0/1 manual spike commands (`push_test_pattern`,
+  `read_button_events`) — better to design that interaction once real
+  hardware is available to actually observe the conflict, instead of
+  guessing at concurrency behavior blind.
 
 **Exit criteria**: this is a usable v1 — physical device shows live,
 accurate session/weekly usage with no manual steps beyond `claude login`.
 
 ## Phase 3 — Personalization
 
+- [ ] Press-to-reveal reset time on a usage button (moved from Phase 2 —
+      needs real hardware to design the reader/reconnect interaction
+      safely, see note above).
 - [ ] Built-in icon set + custom image upload per button.
 - [ ] Button↔metric reassignment UI (any button can show session, weekly,
       or the Phase 3.5 self-imposed budget).

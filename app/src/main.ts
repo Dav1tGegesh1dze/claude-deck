@@ -22,16 +22,14 @@ interface DiscoveredDevice {
 
 type ButtonEvent = { Down: number } | { Up: number };
 
+let lastFetchedAt: string | null = null;
+
 function renderSnapshot(snapshot: UsageSnapshot) {
   renderLimit("session", snapshot.limits.find((l) => l.kind === "session"));
   renderLimit("weekly", snapshot.limits.find((l) => l.kind === "weekly_all"));
 
-  const status = document.querySelector<HTMLElement>("#status-line");
-  if (status) {
-    status.textContent = `Last updated ${new Date(
-      snapshot.fetched_at,
-    ).toLocaleTimeString()}`;
-  }
+  lastFetchedAt = snapshot.fetched_at;
+  setStatus(`Last updated ${new Date(snapshot.fetched_at).toLocaleTimeString()}`);
 }
 
 function renderLimit(prefix: "session" | "weekly", entry: LimitEntry | undefined) {
@@ -61,13 +59,23 @@ function setStatus(text: string) {
   if (status) status.textContent = text;
 }
 
+function setStale(err: unknown) {
+  if (lastFetchedAt) {
+    setStatus(
+      `Stale since ${new Date(lastFetchedAt).toLocaleTimeString()} — ${err}`,
+    );
+  } else {
+    setStatus(`No data yet — ${err}`);
+  }
+}
+
 async function refreshNow() {
   setStatus("Refreshing…");
   try {
     const snapshot = await invoke<UsageSnapshot>("refresh_usage_now");
     renderSnapshot(snapshot);
   } catch (err) {
-    setStatus(`Error: ${err}`);
+    setStale(err);
   }
 }
 
@@ -128,5 +136,5 @@ window.addEventListener("DOMContentLoaded", () => {
   loadCached();
 
   listen<UsageSnapshot>("usage://updated", (event) => renderSnapshot(event.payload));
-  listen<string>("usage://error", (event) => setStatus(`Error: ${event.payload}`));
+  listen<string>("usage://error", (event) => setStale(event.payload));
 });

@@ -152,10 +152,10 @@ pub async fn connect(dev: &HidDeviceInfo) -> Result<(Device, Kind)> {
     Ok((device, kind))
 }
 
-/// Phase 0/1 hardware spike, wired as a real command: connects to the first
-/// supported device found and pushes a solid-color test image to button 0.
-/// Not yet verified against real hardware (see module doc comment).
-pub async fn push_test_pattern() -> Result<String> {
+/// Finds the first connected device with a recognized VID/PID and connects
+/// to it. Used both by the persistent background connection and the manual
+/// spike commands below.
+pub async fn connect_first() -> Result<(Device, Kind)> {
     let found = list_devices(&QUERIES)
         .await
         .map_err(|e| anyhow!("device enumeration failed: {e}"))?;
@@ -165,7 +165,34 @@ pub async fn push_test_pattern() -> Result<String> {
         .find(|d| Kind::from_vid_pid(d.vendor_id, d.product_id).is_some())
         .ok_or_else(|| anyhow!("no supported device connected"))?;
 
-    let (device, kind) = connect(&dev).await?;
+    connect(&dev).await
+}
+
+/// Renders and pushes an image to a single button, then flushes.
+pub async fn push_image(
+    device: &Device,
+    kind: Kind,
+    key: u8,
+    image: DynamicImage,
+) -> Result<()> {
+    device
+        .set_button_image(key, kind.image_format(), image)
+        .await
+        .map_err(|e| anyhow!("failed to push image to button {key}: {e}"))?;
+
+    device
+        .flush()
+        .await
+        .map_err(|e| anyhow!("failed to flush: {e}"))?;
+
+    Ok(())
+}
+
+/// Phase 0/1 hardware spike, wired as a real command: connects to the first
+/// supported device found and pushes a solid-color test image to button 0.
+/// Not yet verified against real hardware (see module doc comment).
+pub async fn push_test_pattern() -> Result<String> {
+    let (device, kind) = connect_first().await?;
 
     let format = kind.image_format();
     let (w, h) = format.size;
@@ -200,16 +227,7 @@ pub enum ButtonEvent {
 /// one batch of button events. Used by the hardware spike to confirm button
 /// presses are actually readable, not just image push.
 pub async fn read_events_once(timeout: std::time::Duration) -> Result<Vec<ButtonEvent>> {
-    let found = list_devices(&QUERIES)
-        .await
-        .map_err(|e| anyhow!("device enumeration failed: {e}"))?;
-
-    let dev = found
-        .into_iter()
-        .find(|d| Kind::from_vid_pid(d.vendor_id, d.product_id).is_some())
-        .ok_or_else(|| anyhow!("no supported device connected"))?;
-
-    let (device, _kind) = connect(&dev).await?;
+    let (device, _kind) = connect_first().await?;
     let reader = device.get_reader(process_input);
 
     let updates = reader
