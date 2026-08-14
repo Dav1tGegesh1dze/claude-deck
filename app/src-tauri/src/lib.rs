@@ -143,6 +143,15 @@ async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// True if the running binary lives under a Cargo build directory rather
+/// than a real install location. Registering a login item pointing at a
+/// throwaway dev build burned us once already - see the long comment in
+/// `.setup()` for the story - so every autostart write path checks this
+/// first, not just startup sync.
+fn is_dev_build_path(path: &std::path::Path) -> bool {
+    path.components().any(|c| c.as_os_str() == "target")
+}
+
 #[tauri::command]
 async fn get_launch_at_login(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
@@ -150,6 +159,14 @@ async fn get_launch_at_login(app: tauri::AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if is_dev_build_path(&std::env::current_exe().unwrap_or_default()) {
+        return Err(
+            "running from a dev build path - launch-at-login is disabled to avoid \
+             registering a throwaway path (see is_dev_build_path)"
+                .to_string(),
+        );
+    }
+
     let autolaunch = app.autolaunch();
     let result = if enabled {
         autolaunch.enable()
@@ -509,17 +526,35 @@ pub fn run() {
 
             // Sync the OS-level login-item registration to match the
             // saved preference (default true - see config::AppConfig).
-            // Best-effort: platforms/sandboxes that reject this shouldn't
-            // block startup.
-            let cfg = config::load(&handle);
-            let autolaunch = handle.autolaunch();
-            let sync_result = if cfg.launch_at_login {
-                autolaunch.enable()
+            //
+            // Found the hard way 2026-08-14: the underlying `auto-launch`
+            // crate registers whatever `std::env::current_exe()` resolves
+            // to *at the moment `enable()` runs*. Running a local dev
+            // build even once wrote a LaunchAgent pointing at the throwaway
+            // target/release build path instead of the real installed
+            // app - which then either silently failed at boot (Gatekeeper
+            // doesn't trust an unsigned dev binary launchd invokes
+            // directly) or just pointed at a path that could vanish on
+            // the next `cargo build`. Guard against ever doing that again,
+            // and force a fresh disable+enable each real launch so a
+            // stale registration (e.g. left over from exactly this bug)
+            // self-heals instead of silently persisting forever.
+            if is_dev_build_path(&std::env::current_exe().unwrap_or_default()) {
+                log::warn!(
+                    "running from a dev build path - skipping launch-at-login registration"
+                );
             } else {
-                autolaunch.disable()
-            };
-            if let Err(e) = sync_result {
-                log::warn!("failed to sync launch-at-login state: {e}");
+                let cfg = config::load(&handle);
+                let autolaunch = handle.autolaunch();
+                let _ = autolaunch.disable();
+                let sync_result = if cfg.launch_at_login {
+                    autolaunch.enable()
+                } else {
+                    Ok(())
+                };
+                if let Err(e) = sync_result {
+                    log::warn!("failed to sync launch-at-login state: {e}");
+                }
             }
 
             let tray_icon = tauri::image::Image::from_bytes(TRAY_ICON_BYTES)?;
