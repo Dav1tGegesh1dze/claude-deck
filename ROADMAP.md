@@ -237,6 +237,44 @@ documented for the next session rather than changed mid-release-cycle.
         fighting the OS at all.
       **Decide next session** which combination to implement — this is a
       product-philosophy call as much as a technical one.
+- [ ] **Button images don't survive a reboot/power cycle** — reported
+      2026-08-14: user shut down and restarted their Mac; the two buttons
+      Claude Deck had painted (session/weekly) came back blank, while
+      every button configured through AJAZZ's own Stream Dock was intact.
+      **Investigated root cause** (reasoned from the protocol surface, not
+      directly instrumented/proven): these HID button displays almost
+      certainly hold the pushed image in **volatile** device RAM, not
+      persistent flash. Checked `mirajazz`'s entire `Device` API
+      surface — there is no persist/save-to-device method anywhere in it
+      (`set_button_image`/`flush` only display, there's no
+      "commit to flash" counterpart), which is consistent with power loss
+      simply clearing whatever was last shown. Stream Dock's buttons
+      *look* persistent only because that app almost certainly launches
+      at login and re-pushes its configured images the moment it starts —
+      the device isn't remembering anything, Stream Dock is just always
+      there to repaint it before the user notices. Claude Deck currently
+      has **no equivalent auto-launch**, so after a reboot nothing repaints
+      its buttons until the user manually reopens it.
+      **This is the same underlying gap as the "Launch at Login" option
+      above** (Quit-policy item) — that idea just got a second, arguably
+      stronger justification: it's not only a mitigation for accidental
+      quits, it's the actual fix for "my setup doesn't survive a reboot."
+      **Proposed fix, next session**:
+      - Add launch-at-login via the official `tauri-plugin-autostart`
+        (confirmed real, actively maintained, full Windows + macOS
+        support) as a Settings toggle — likely default-on given the
+        product's whole point is staying alive in the background, but
+        should stay a user choice, not forced.
+      - On startup, retry device connection with backoff for a few
+        seconds/attempts instead of the current single attempt inside the
+        first poll — right after boot, the OS may not have finished USB
+        enumeration yet when Claude Deck's first connect attempt runs.
+      - Related, lower-priority: adopt `mirajazz::device::DeviceWatcher`
+        (a connect/disconnect event stream the library already exposes
+        that we don't currently use) so unplugging/replugging the device
+        **mid-session** triggers an immediate repaint too, instead of only
+        being noticed and reconnected on the next scheduled poll tick (up
+        to `refresh_interval_secs` later).
 
 ## Phase 6 — Stretch (post-v1, not committed)
 
