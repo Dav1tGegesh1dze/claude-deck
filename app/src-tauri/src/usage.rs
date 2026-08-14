@@ -10,6 +10,32 @@ const USAGE_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
+/// Distinguishes "the endpoint rate-limited us" from other failures, so
+/// callers can back off instead of just logging-and-retrying-at-normal-pace.
+/// See ROADMAP.md "Known issues" - a low refresh interval reliably
+/// triggers this endpoint's own undocumented rate limit.
+#[derive(Debug)]
+pub enum PollError {
+    RateLimited { retry_after_secs: Option<u64> },
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for PollError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PollError::RateLimited {
+                retry_after_secs: Some(s),
+            } => write!(f, "rate limited by usage endpoint (HTTP 429), retry after {s}s"),
+            PollError::RateLimited {
+                retry_after_secs: None,
+            } => write!(f, "rate limited by usage endpoint (HTTP 429)"),
+            PollError::Other(e) => write!(f, "{e:#}"),
+        }
+    }
+}
+
+impl std::error::Error for PollError {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LimitEntry {
     pub kind: String,
@@ -79,24 +105,37 @@ fn read_credential_blob() -> Result<String> {
     })
 }
 
-pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageSnapshot> {
+pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageSnapshot, PollError> {
     let response = client
         .get(USAGE_ENDPOINT)
         .bearer_auth(token)
         .header("anthropic-beta", OAUTH_BETA_HEADER)
         .send()
         .await
-        .context("request to usage endpoint failed")?;
+        .map_err(|e| PollError::Other(anyhow!("request to usage endpoint failed: {e}")))?;
 
     let status = response.status();
-    if !status.is_success() {
-        return Err(anyhow!("usage endpoint returned HTTP {status}"));
+
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after_secs = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        return Err(PollError::RateLimited { retry_after_secs });
     }
 
-    let raw: RawUsageResponse = response
-        .json()
-        .await
-        .context("usage endpoint response did not match expected shape")?;
+    if !status.is_success() {
+        return Err(PollError::Other(anyhow!(
+            "usage endpoint returned HTTP {status}"
+        )));
+    }
+
+    let raw: RawUsageResponse = response.json().await.map_err(|e| {
+        PollError::Other(anyhow!(
+            "usage endpoint response did not match expected shape: {e}"
+        ))
+    })?;
 
     Ok(UsageSnapshot {
         limits: raw.limits,
@@ -104,8 +143,6 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageS
     })
 }
 
-/// One poll attempt: read the token fresh each time (cheap, and tolerates
-/// token refresh/rotation between polls) and fetch usage.
 /// Polls usage, reusing a cached token when possible so the OS credential
 /// store (macOS Keychain, which prompts the user) isn't touched on every
 /// single poll tick — only once, plus a re-read if the cached token stops
@@ -115,18 +152,24 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageS
 pub async fn poll_cached(
     client: &reqwest::Client,
     cached_token: &tokio::sync::Mutex<Option<String>>,
-) -> Result<UsageSnapshot> {
+) -> Result<UsageSnapshot, PollError> {
     let existing = cached_token.lock().await.clone();
 
     if let Some(token) = existing {
-        if let Ok(snapshot) = fetch_usage(client, &token).await {
-            return Ok(snapshot);
+        match fetch_usage(client, &token).await {
+            Ok(snapshot) => return Ok(snapshot),
+            // Don't mask rate limiting by silently retrying with a fresh
+            // token read - that just wastes a Keychain touch and gets
+            // limited again.
+            Err(err @ PollError::RateLimited { .. }) => return Err(err),
+            Err(PollError::Other(_)) => {
+                // Cached token might be stale/expired/rotated - fall
+                // through to a fresh read from the credential store.
+            }
         }
-        // Cached token might be stale/expired/rotated - fall through to a
-        // fresh read from the credential store.
     }
 
-    let fresh = read_access_token()?;
+    let fresh = read_access_token().map_err(PollError::Other)?;
     let snapshot = fetch_usage(client, &fresh).await?;
     *cached_token.lock().await = Some(fresh);
     Ok(snapshot)

@@ -41,9 +41,15 @@
 
       <div class="row settings-row">
         <label for="refresh-interval-input">Refresh interval (seconds)</label>
-        <input id="refresh-interval-input" type="number" min="30" step="30" />
+        <input id="refresh-interval-input" type="number" min="120" step="30" />
         <button id="save-refresh-interval-btn">Save</button>
       </div>
+      <p class="hint">
+        Minimum 120s — the usage endpoint's own rate limiting kicks in well
+        below that (confirmed: 50s reliably triggers HTTP 429). 300s
+        (default) is the proven-safe interval a known-working reference
+        tool uses.
+      </p>
 
       <div class="row settings-row">
         <label for="budget-enabled-input">
@@ -53,6 +59,17 @@
         <input id="budget-cap-input" type="number" min="1" step="1" />
         <span class="hint">% of weekly budget per day</span>
         <button id="save-budget-btn">Save</button>
+      </div>
+
+      <div class="row settings-row">
+        <label for="launch-at-login-input">
+          <input id="launch-at-login-input" type="checkbox" />
+          Launch at login
+        </label>
+        <span class="hint">
+          Button images live in volatile device memory — without this,
+          they go blank after every reboot until you reopen the app.
+        </span>
       </div>
 
       <h3>Button assignments</h3>
