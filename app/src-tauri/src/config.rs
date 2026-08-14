@@ -45,6 +45,17 @@ impl Default for BudgetConfig {
     }
 }
 
+/// Floor for `refresh_interval_secs`. The usage endpoint's own
+/// undocumented rate limiting kicks in well before this on real-world
+/// evidence (a user hit HTTP 429 at 50s) - a known-working reference
+/// implementation defaults to 300s and explicitly warns against low
+/// values. See ROADMAP.md "Known issues" for the sourcing.
+pub const MIN_REFRESH_INTERVAL_SECS: u64 = 120;
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub refresh_interval_secs: u64,
@@ -52,6 +63,13 @@ pub struct AppConfig {
     pub buttons: Vec<ButtonAssignment>,
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// Whether Claude Deck should start automatically at login. Default
+    /// true for new installs - button images live in volatile device
+    /// memory (confirmed via mirajazz's API surface having no persist
+    /// call), so nothing repaints them after a reboot unless something is
+    /// running to do it. See ROADMAP.md "Known issues" for the writeup.
+    #[serde(default = "default_true")]
+    pub launch_at_login: bool,
 }
 
 /// No buttons assigned by default — the user picks explicitly which
@@ -69,6 +87,7 @@ impl Default for AppConfig {
             refresh_interval_secs: 300,
             buttons: default_buttons(),
             budget: BudgetConfig::default(),
+            launch_at_login: true,
         }
     }
 }
@@ -80,12 +99,21 @@ fn config_path(app: &AppHandle) -> anyhow::Result<std::path::PathBuf> {
 }
 
 pub fn load(app: &AppHandle) -> AppConfig {
-    (|| -> anyhow::Result<AppConfig> {
+    let mut cfg = (|| -> anyhow::Result<AppConfig> {
         let path = config_path(app)?;
         let raw = std::fs::read_to_string(path)?;
         Ok(serde_json::from_str(&raw)?)
     })()
-    .unwrap_or_default()
+    .unwrap_or_default();
+
+    // Auto-heal a too-low saved interval (e.g. from before this floor
+    // existed) rather than leaving the user stuck re-triggering 429s
+    // every launch.
+    if cfg.refresh_interval_secs < MIN_REFRESH_INTERVAL_SECS {
+        cfg.refresh_interval_secs = MIN_REFRESH_INTERVAL_SECS;
+    }
+
+    cfg
 }
 
 pub fn save(app: &AppHandle, config: &AppConfig) -> anyhow::Result<()> {

@@ -11,7 +11,18 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
+use tauri_plugin_autostart::ManagerExt as _;
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
+
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray/tray-icon@2x.png");
+/// How many times to retry connecting to the device right after launch,
+/// and how far apart. Found necessary 2026-08-14: right after a reboot
+/// the app can start before the OS finishes USB enumeration, so a single
+/// connect attempt at startup can miss a device that's plugged in and
+/// about to be ready a few seconds later.
+const STARTUP_CONNECT_ATTEMPTS: u32 = 8;
+const STARTUP_CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
 struct ConnectedDevice {
     device: Device,
@@ -66,11 +77,12 @@ async fn read_button_events(timeout_secs: u64) -> Result<Vec<device::ButtonEvent
 }
 
 /// Saves the new interval; takes effect after restart. Live-restarting the
-/// running poll loop is a small follow-up, not done yet.
+/// running poll loop is a small follow-up, not done yet. Clamped to
+/// config::MIN_REFRESH_INTERVAL_SECS - see that constant's doc comment.
 #[tauri::command]
 async fn set_refresh_interval(app: tauri::AppHandle, seconds: u64) -> Result<(), String> {
     let mut cfg = config::load(&app);
-    cfg.refresh_interval_secs = seconds;
+    cfg.refresh_interval_secs = seconds.max(config::MIN_REFRESH_INTERVAL_SECS);
     config::save(&app, &cfg).map_err(|e| e.to_string())
 }
 
@@ -131,6 +143,26 @@ async fn reset_button_assignments(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn get_launch_at_login(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    let result = if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+    result.map_err(|e| e.to_string())?;
+
+    let mut cfg = config::load(&app);
+    cfg.launch_at_login = enabled;
+    config::save(&app, &cfg).map_err(|e| e.to_string())
+}
+
 /// For any screen button that was assigned a metric in `old` but is
 /// `none` in `new`, actively blanks that button's screen via
 /// `Device::clear_button_image` instead of just leaving the last-rendered
@@ -150,8 +182,16 @@ async fn clear_released_buttons(
     let mut cleared_any = false;
 
     for i in 0..device::SCREEN_KEY_COUNT {
-        let was = old.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
-        let now = new.buttons.get(i).map(|b| b.metric).unwrap_or(config::Metric::None);
+        let was = old
+            .buttons
+            .get(i)
+            .map(|b| b.metric)
+            .unwrap_or(config::Metric::None);
+        let now = new
+            .buttons
+            .get(i)
+            .map(|b| b.metric)
+            .unwrap_or(config::Metric::None);
 
         if was != config::Metric::None && now == config::Metric::None {
             if let Err(e) = conn.device.clear_button_image(i as u8).await {
@@ -165,6 +205,39 @@ async fn clear_released_buttons(
     if cleared_any {
         if let Err(e) = conn.device.flush().await {
             log::error!("failed to flush after clearing buttons: {e}");
+        }
+    }
+}
+
+/// Blanks every currently-assigned button's screen — used when the app is
+/// about to quit, so the physical device honestly shows "not running"
+/// instead of silently freezing on stale numbers. Best-effort: does
+/// nothing if no device is connected.
+async fn blank_assigned_buttons(app: &tauri::AppHandle) {
+    let cfg = config::load(app);
+    let state = app.state::<AppState>();
+    let guard = state.device.lock().await;
+    let Some(conn) = guard.as_ref() else {
+        return;
+    };
+
+    let mut cleared_any = false;
+
+    for (i, assignment) in cfg.buttons.iter().enumerate() {
+        if i >= device::SCREEN_KEY_COUNT {
+            break;
+        }
+        if assignment.metric != config::Metric::None {
+            match conn.device.clear_button_image(i as u8).await {
+                Ok(()) => cleared_any = true,
+                Err(e) => log::error!("failed to clear button {i} on quit: {e}"),
+            }
+        }
+    }
+
+    if cleared_any {
+        if let Err(e) = conn.device.flush().await {
+            log::error!("failed to flush after clearing buttons on quit: {e}");
         }
     }
 }
@@ -342,6 +415,15 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
                     let _ = app.emit("usage://updated", &snapshot);
                     apply_snapshot(&app, &snapshot).await;
                 }
+                Err(usage::PollError::RateLimited { retry_after_secs }) => {
+                    let backoff = retry_after_secs.unwrap_or(120);
+                    log::warn!("usage endpoint rate limited (429), backing off {backoff}s");
+                    let _ = app.emit(
+                        "usage://error",
+                        format!("Rate limited by usage endpoint - waiting {backoff}s"),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+                }
                 Err(err) => {
                     log::error!("usage poll failed: {err:#}");
                     let _ = app.emit("usage://error", err.to_string());
@@ -351,10 +433,53 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
     });
 }
 
+/// Retries connecting to the device a few times right after launch — see
+/// STARTUP_CONNECT_ATTEMPTS's doc comment for why a single attempt isn't
+/// enough right after a reboot. Backs off immediately (checking
+/// AppState.device first) if a poll tick elsewhere already connected.
+fn spawn_startup_device_connect(app: &tauri::AppHandle) {
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+
+        for attempt in 0..STARTUP_CONNECT_ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(STARTUP_CONNECT_RETRY_DELAY).await;
+            }
+
+            {
+                let guard = state.device.lock().await;
+                if guard.is_some() {
+                    return; // a usage poll tick already connected one
+                }
+            }
+
+            if let Ok((device, kind)) = device::connect_first().await {
+                log::info!(
+                    "Connected to device on startup (attempt {}): {}",
+                    attempt + 1,
+                    kind.human_name()
+                );
+                *state.device.lock().await = Some(ConnectedDevice { device, kind });
+                push_now(&app).await;
+                return;
+            }
+        }
+
+        log::info!("No supported device found after startup connection retries");
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -376,19 +501,46 @@ pub fn run() {
             set_button_metric,
             set_budget_config,
             reset_button_assignments,
+            get_launch_at_login,
+            set_launch_at_login,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+
+            // Sync the OS-level login-item registration to match the
+            // saved preference (default true - see config::AppConfig).
+            // Best-effort: platforms/sandboxes that reject this shouldn't
+            // block startup.
+            let cfg = config::load(&handle);
+            let autolaunch = handle.autolaunch();
+            let sync_result = if cfg.launch_at_login {
+                autolaunch.enable()
+            } else {
+                autolaunch.disable()
+            };
+            if let Err(e) = sync_result {
+                log::warn!("failed to sync launch-at-login state: {e}");
+            }
+
+            let tray_icon = tauri::image::Image::from_bytes(TRAY_ICON_BYTES)?;
 
             let show_item = MenuItem::with_id(app, "show", "Show Claude Deck", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             TrayIconBuilder::with_id("main")
+                .icon(tray_icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .tooltip("Claude Deck")
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            blank_assigned_buttons(&handle).await;
+                            handle.exit(0);
+                        });
+                    }
                     "show" => show_main_window(app),
                     _ => {}
                 })
@@ -399,7 +551,8 @@ pub fn run() {
             // the background (found missing during hardware testing: the
             // display just froze on close because the process was exiting
             // and killing the poller with it). Hide instead; "Quit" in the
-            // tray menu is the only way to actually exit.
+            // tray menu (or a confirmed Cmd+Q/Dock-Quit, see .run() below)
+            // is the only way to actually exit.
             if let Some(window) = app.get_webview_window("main") {
                 let window_to_hide = window.clone();
                 window.on_window_event(move |event| {
@@ -430,21 +583,54 @@ pub fn run() {
                 }
             });
 
+            spawn_startup_device_connect(&handle);
             spawn_usage_poller(&handle);
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {
+        .run(|app_handle, event| {
             // macOS: clicking the Dock icon while the window is hidden
             // should bring it back, matching normal Mac app behavior.
             // RunEvent::Reopen only exists on macOS - this must be cfg'd
             // out on other platforms or the build doesn't even compile
-            // (found via a real Windows CI failure, not guessed).
+            // (found via a real Windows CI failure, not guessed). Match on
+            // a reference so `event` is still available below.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = _event {
-                show_main_window(_app_handle);
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                show_main_window(app_handle);
+            }
+
+            // Cmd+Q / Dock right-click "Quit" bypass the window-close
+            // handling above entirely (different event, see SPEC.md
+            // "Process lifecycle"). `code: None` means the OS/user
+            // triggered this directly, as opposed to our own tray "Quit"
+            // item calling app.exit(0) (which reports code: Some(0) here
+            // and is intentionally left alone). Confirm first, since
+            // quitting stops the background usage updates - decided
+            // 2026-08-14 after the reboot-persistence investigation.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                api.prevent_exit();
+                let handle = app_handle.clone();
+                app_handle
+                    .dialog()
+                    .message("Quitting stops Claude Deck from updating your device.")
+                    .title("Quit Claude Deck?")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+                    .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom(
+                        "Quit".to_string(),
+                        "Cancel".to_string(),
+                    ))
+                    .show(move |confirmed| {
+                        if confirmed {
+                            let handle = handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                blank_assigned_buttons(&handle).await;
+                                handle.exit(0);
+                            });
+                        }
+                    });
             }
         });
 }

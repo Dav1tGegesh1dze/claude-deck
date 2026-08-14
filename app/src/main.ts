@@ -161,6 +161,11 @@ async function loadSettings() {
   if (budgetEnabled) budgetEnabled.checked = cfg.budget.enabled;
   if (budgetCap) budgetCap.value = String(cfg.budget.daily_cap_percent);
 
+  const launchAtLoginInput = document.querySelector<HTMLInputElement>("#launch-at-login-input");
+  if (launchAtLoginInput) {
+    launchAtLoginInput.checked = await invoke<boolean>("get_launch_at_login");
+  }
+
   renderButtonsGrid(cfg.buttons);
 }
 
@@ -234,6 +239,11 @@ async function saveBudget() {
   await invoke("set_budget_config", { enabled, dailyCapPercent: cap });
 }
 
+async function saveLaunchAtLogin() {
+  const enabled = document.querySelector<HTMLInputElement>("#launch-at-login-input")?.checked ?? false;
+  await invoke("set_launch_at_login", { enabled });
+}
+
 async function resetButtons() {
   const confirmed = confirm(
     "Reset all buttons to \"none\"? Any button Claude Deck currently owns " +
@@ -255,6 +265,9 @@ window.addEventListener("DOMContentLoaded", () => {
     .querySelector("#save-refresh-interval-btn")
     ?.addEventListener("click", saveRefreshInterval);
   document.querySelector("#save-budget-btn")?.addEventListener("click", saveBudget);
+  document
+    .querySelector("#launch-at-login-input")
+    ?.addEventListener("change", saveLaunchAtLogin);
   document.querySelector("#reset-buttons-btn")?.addEventListener("click", resetButtons);
 
   loadCached();
