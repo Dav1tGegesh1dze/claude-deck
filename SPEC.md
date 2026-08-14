@@ -150,8 +150,22 @@ actively running.
   Reverser, or AJAZZ's own control app), not the full-color app bundle
   icon. Confirmed as a gap on 2026-08-14: `TrayIconBuilder` was never
   given an explicit `.icon(...)`, and Tauri has no automatic fallback for
-  this, so the current build likely shows no menu-bar icon at all. See
+  this. A real screenshot confirmed something renders and is clickable
+  (correct menu items appear), but not as a recognizable icon — see
   ROADMAP.md "Known issues" for the fix.
+- **Process lifecycle / quit policy — open decision, not yet resolved.**
+  §6.1's "hide instead of quit" only intercepts the window's own close
+  button (`WindowEvent::CloseRequested`). It does **not** cover Cmd+Q or
+  Dock right-click → Quit, which go through a different app-level exit
+  path and fully terminate the app (and the background poller) the same
+  way the pre-v0.1.1 bug did. This is confirmed technically fixable —
+  Tauri's `RunEvent::ExitRequested` can distinguish user-initiated quits
+  from the app's own programmatic `app.exit()` calls and block just the
+  former — but *whether it should be blocked at all* is a product
+  decision, not just an engineering one: silently ignoring Cmd+Q goes
+  against standard macOS conventions. See ROADMAP.md "Known issues" for
+  the researched options (confirmation dialog, launch-at-login,
+  push-a-"paused"-image-on-quit, or leave as-is) to decide next session.
 - Settings window: button↔metric mapping (grid matching the physical
   device), refresh interval, soft-budget configuration.
 
