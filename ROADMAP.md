@@ -185,19 +185,58 @@ documented for the next session rather than changed mid-release-cycle.
       to 300s and floor-clamping manual input well above 50 — exact
       numbers to decide next session) plus handling a `429`/`Retry-After`
       response by backing off rather than just marking the poll failed.
-- [ ] **Tray/menu-bar icon likely isn't rendering at all**, not just
-      wrong-looking. Checked `TrayIconBuilder` in `lib.rs`: `.icon(...)`
-      is never called. Confirmed via Tauri's own source
-      (`crates/tauri/src/tray/mod.rs`) that `.icon()` is optional with
-      **no automatic fallback** — nothing else in `build()`/`build_inner()`
-      assigns a default icon. Could not visually confirm with a screenshot
-      (Screen Recording permission blocked for the automation in this
-      environment), but the code path is unambiguous enough to treat this
-      as a real bug, not just polish.
+- [ ] **Tray/menu-bar icon renders, but as an unrecognizable blank
+      marker** — confirmed 2026-08-14 via a real screenshot from the user
+      (corrects the earlier guess that nothing renders at all: something
+      does show up and is clickable — right menu items appear ("Show
+      Claude Deck" / "Quit") — it's just not a real icon, so it's
+      practically invisible among other apps' icons in the menu bar).
+      Root cause still applies: checked `TrayIconBuilder` in `lib.rs`,
+      `.icon(...)` is never called, and Tauri's own source
+      (`crates/tauri/src/tray/mod.rs`) confirms no automatic fallback
+      exists — whatever's rendering is some minimal OS/framework
+      placeholder, not our app icon.
       **Proposed fix**: add a proper small monochrome "template" icon
       (macOS menu-bar convention — single-color silhouette + alpha, like
-      Scroll Reverser or other background-utility apps use) and pass it to
+      Scroll Reverser or AJAZZ's own tray icon use) and pass it to
       `.icon(...)`. See SPEC.md §6.4 for the requirement this adds.
+- [ ] **Quitting via the Dock (right-click/two-finger-click → Quit) or
+      Cmd+Q bypasses the hide-on-close fix entirely and fully exits the
+      app**, stopping background updates the same way the pre-v0.1.1 bug
+      did. Root cause: v0.1.1 only intercepts `WindowEvent::CloseRequested`
+      (the window's own close button). Standard macOS quit gestures don't
+      go through that event at all — they go through the app-level exit
+      flow directly.
+      **Investigated the technical fix**: Tauri exposes
+      `RunEvent::ExitRequested { code, api }` in the `.run()` event loop.
+      `api.prevent_exit()` can block it, and `code` distinguishes *why* it
+      fired: `None` = user-initiated (Cmd+Q, Dock quit), `Some(_)` = our
+      own programmatic call (e.g. the tray's own "Quit" item, which calls
+      `app.exit(0)`). So it's technically straightforward to block only
+      the ambient OS-level quit gestures while still letting our own
+      "Quit" menu item work — this is not a hard problem, it's a **design
+      decision, not investigated further than confirming the mechanism**:
+      - Do nothing — Cmd+Q/Dock-Quit actually quitting is standard macOS
+        convention; apps that silently ignore it are usually considered
+        broken (or malware-like). Once the tray icon fix above makes the
+        app's presence obvious, that may be enough of a signal.
+      - Intercept and always block ambient quit requests — matches "never
+        stops monitoring," but fights the platform's own conventions and
+        could feel like the app can't be quit, which is a bad look.
+      - Intercept and show a confirmation dialog ("Quitting stops Claude
+        Deck from updating your device — quit anyway?") — middle ground,
+        catches accidental muscle-memory quits without fully overriding
+        user intent.
+      - Independent of the above: on any deliberate quit, push a
+        visibly "paused/stopped" image to the assigned buttons before
+        actually exiting, so the physical device honestly shows it
+        stopped instead of silently freezing on stale numbers. Worth
+        doing regardless of which quit-policy is chosen.
+      - Add a "Launch at Login" setting so even an accidental quit
+        self-heals on next login — softer mitigation, doesn't require
+        fighting the OS at all.
+      **Decide next session** which combination to implement — this is a
+      product-philosophy call as much as a technical one.
 
 ## Phase 6 — Stretch (post-v1, not committed)
 
