@@ -166,6 +166,22 @@ actively running.
   against standard macOS conventions. See ROADMAP.md "Known issues" for
   the researched options (confirmation dialog, launch-at-login,
   push-a-"paused"-image-on-quit, or leave as-is) to decide next session.
+- **Launch at login — needed, not yet implemented.** Reported 2026-08-14:
+  button images don't survive a Mac reboot, while AJAZZ's own
+  Stream-Dock-configured buttons do. Root cause (reasoned from the
+  `mirajazz` protocol surface, which exposes no persist/save-to-device
+  call anywhere): these button displays hold the pushed image in
+  volatile device memory, not flash. Stream Dock's buttons only *look*
+  persistent because that app auto-launches at login and repaints them
+  immediately; Claude Deck currently has no equivalent, so nothing
+  repaints its buttons after a reboot until the user manually reopens
+  it. This is the same underlying need as the launch-at-login option
+  above — implement via the official `tauri-plugin-autostart`, exposed
+  as a Settings toggle (default-on recommended, but must stay a user
+  choice). See ROADMAP.md "Known issues" for the full writeup, including
+  the related need for a startup connection-retry (USB may not be
+  enumerated yet immediately after boot) and, lower priority, adopting
+  `mirajazz`'s `DeviceWatcher` for live reconnect handling mid-session.
 - Settings window: button↔metric mapping (grid matching the physical
   device), refresh interval, soft-budget configuration.
 
