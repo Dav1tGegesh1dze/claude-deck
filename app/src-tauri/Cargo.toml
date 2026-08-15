@@ -37,4 +37,5 @@ tauri-plugin-log = "2.9.0"
 log = "0.4.33"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-autostart = "2.5.1"
+futures-lite = "2.6.1"
 

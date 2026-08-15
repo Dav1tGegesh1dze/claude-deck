@@ -269,12 +269,21 @@ documented for the next session rather than changed mid-release-cycle.
         seconds/attempts instead of the current single attempt inside the
         first poll — right after boot, the OS may not have finished USB
         enumeration yet when Claude Deck's first connect attempt runs.
-      - Related, lower-priority: adopt `mirajazz::device::DeviceWatcher`
-        (a connect/disconnect event stream the library already exposes
-        that we don't currently use) so unplugging/replugging the device
-        **mid-session** triggers an immediate repaint too, instead of only
-        being noticed and reconnected on the next scheduled poll tick (up
-        to `refresh_interval_secs` later).
+      - [x] **Done, 2026-08-15 — this was not actually low priority.**
+        Originally filed as a nice-to-have; turned out to be the direct
+        cause of a real, reproducible bug: unplugging and replugging the
+        AKP03E while the app was running left the assigned buttons blank,
+        sometimes indefinitely, because device presence was only ever
+        re-checked as a side effect of a usage poll tick (now 120-300s
+        apart after the 429 fix), and a failed push wasn't reliably
+        firing quickly after a real unplug either. Adopted
+        `mirajazz::device::DeviceWatcher` (`device::watch_forever` +
+        `spawn_device_watcher` in lib.rs) for OS-level HID attach/detach
+        notifications instead. Verified against real hardware by
+        watching the app's log live while unplugging/replugging:
+        disconnect detected instantly, reconnect detected ~11s later
+        (mid-retry-window) with a successful repaint, no manual restart
+        needed.
 
 ## Phase 6 — Stretch (post-v1, not committed)
 
