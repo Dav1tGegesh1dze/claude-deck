@@ -8,9 +8,10 @@
 //! Verify before Phase 5 release (see ROADMAP.md Phase 0).
 
 use anyhow::{anyhow, Result};
+use futures_lite::StreamExt;
 use image::{DynamicImage, Rgb, RgbImage};
 use mirajazz::{
-    device::{list_devices, Device, DeviceQuery},
+    device::{list_devices, Device, DeviceQuery, DeviceWatcher},
     error::MirajazzError,
     types::{DeviceInput, HidDeviceInfo, ImageFormat, ImageMirroring, ImageMode, ImageRotation},
 };
@@ -285,4 +286,62 @@ fn read_button_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError>
 
 fn to_bools(states: &[u8]) -> Vec<bool> {
     (0..KEY_COUNT).map(|i| states[i + 1] != 0).collect()
+}
+
+/// Reported over the channel `watch_forever` sends to - deliberately not
+/// `mirajazz::device::DeviceLifecycleEvent` directly, so callers don't need
+/// to depend on mirajazz's types just to consume this.
+pub enum DeviceLifecycle {
+    Connected(HidDeviceInfo),
+    Disconnected,
+}
+
+/// Watches for the device being plugged in or unplugged **while the app is
+/// already running**, and reports each transition over `tx` immediately -
+/// this is the actual fix for "I unplugged and replugged the device and
+/// the buttons stayed blank." Before this, the only way we noticed a
+/// device was gone was a failed image push during the next scheduled
+/// usage poll (up to `refresh_interval_secs` later, now 120-300s after
+/// the 429 fix), and there was no evidence a failed push reliably fired
+/// quickly after an actual unplug either. OS-level HID attach/detach
+/// notifications (what this wraps, via mirajazz's DeviceWatcher /
+/// async-hid) are how a well-behaved app is supposed to do this -
+/// mirajazz already exposed it, we just weren't using it.
+///
+/// Runs until the underlying event stream ends (which shouldn't normally
+/// happen for a live hardware-events subscription); callers should treat
+/// that as worth retrying with a fresh `DeviceWatcher`, since a
+/// `DeviceWatcher` can only be watched once.
+///
+/// Does **not** distinguish which of several devices changed if more than
+/// one supported device is plugged in at once - matches the rest of this
+/// module's single-active-device assumption (see connect_first). Not
+/// something we've had a way to test with only one real device.
+pub async fn watch_forever(tx: tokio::sync::mpsc::UnboundedSender<DeviceLifecycle>) {
+    let mut watcher = DeviceWatcher::new();
+
+    let stream = match watcher.watch(&QUERIES).await {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("failed to start device watcher: {e}");
+            return;
+        }
+    };
+
+    futures_lite::pin!(stream);
+
+    while let Some(event) = stream.next().await {
+        let lifecycle = match event {
+            mirajazz::types::DeviceLifecycleEvent::Connected(info) => {
+                DeviceLifecycle::Connected(info)
+            }
+            mirajazz::types::DeviceLifecycleEvent::Disconnected(_) => {
+                DeviceLifecycle::Disconnected
+            }
+        };
+
+        if tx.send(lifecycle).is_err() {
+            return; // receiving end gone - app is shutting down
+        }
+    }
 }

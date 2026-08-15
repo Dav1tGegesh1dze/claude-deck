@@ -488,6 +488,62 @@ fn spawn_startup_device_connect(app: &tauri::AppHandle) {
     });
 }
 
+/// Handles one live connect/disconnect event from `device::watch_forever`.
+/// On Connected, retries opening the device briefly (mirrors
+/// spawn_startup_device_connect - the device reporting present over USB
+/// and actually being ready for `Device::connect` aren't always the same
+/// instant) and immediately repaints it with the last known usage, rather
+/// than waiting for the next scheduled poll tick.
+async fn handle_device_lifecycle_event(app: &tauri::AppHandle, event: device::DeviceLifecycle) {
+    let state = app.state::<AppState>();
+
+    match event {
+        device::DeviceLifecycle::Connected(info) => {
+            for attempt in 0..STARTUP_CONNECT_ATTEMPTS {
+                if attempt > 0 {
+                    tokio::time::sleep(STARTUP_CONNECT_RETRY_DELAY).await;
+                }
+                if let Ok((device, kind)) = device::connect(&info).await {
+                    log::info!("Device reconnected: {}", kind.human_name());
+                    *state.device.lock().await = Some(ConnectedDevice { device, kind });
+                    push_now(app).await;
+                    return;
+                }
+            }
+            log::warn!("device reported connected but failed to open after retries");
+        }
+        device::DeviceLifecycle::Disconnected => {
+            log::info!("Device disconnected");
+            *state.device.lock().await = None;
+        }
+    }
+}
+
+/// Keeps a live device-presence watch running for the whole app lifetime.
+/// A `DeviceWatcher` can only be watched once (mirajazz's constraint), so
+/// if the event stream ever ends unexpectedly, this starts a fresh one
+/// after a short delay rather than silently going dark - going back to
+/// poll-tick-only reconnect detection would reintroduce the exact bug
+/// this exists to fix.
+fn spawn_device_watcher(app: &tauri::AppHandle) {
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let watch_task = tauri::async_runtime::spawn(device::watch_forever(tx));
+
+            while let Some(event) = rx.recv().await {
+                handle_device_lifecycle_event(&app, event).await;
+            }
+
+            log::warn!("device watch stream ended, restarting in 5s");
+            let _ = watch_task.await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -619,6 +675,7 @@ pub fn run() {
             });
 
             spawn_startup_device_connect(&handle);
+            spawn_device_watcher(&handle);
             spawn_usage_poller(&handle);
 
             Ok(())
