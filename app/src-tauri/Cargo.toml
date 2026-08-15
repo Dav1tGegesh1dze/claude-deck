@@ -1,6 +1,6 @@
 [package]
 name = "claude-deck"
-version = "0.1.2"
+version = "0.1.3"
 description = "Live Claude Code session/weekly usage on a physical stream-controller device"
 authors = ["Davit Gegeshidze"]
 license = "MIT"
