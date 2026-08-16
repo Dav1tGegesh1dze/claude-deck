@@ -403,10 +403,38 @@ fn update_tray_tooltip(app: &tauri::AppHandle, snapshot: &usage::UsageSnapshot) 
     }
 }
 
+/// Shows the window and restores the Dock icon (macOS). The Dock icon is
+/// deliberately tied to window visibility, not to whether the app is
+/// running - matching how AJAZZ's own control app behaves (visible in the
+/// Dock while its window is open, gone from the Dock but still running
+/// with a menu-bar icon once closed), and distinct from the tray icon,
+/// which stays up the whole time the app is alive regardless.
 fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        match app.set_dock_visibility(true) {
+            Ok(()) => log::info!("Dock icon shown"),
+            Err(e) => log::warn!("failed to show Dock icon: {e}"),
+        }
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+/// Hides the window and removes the Dock icon (macOS) - see
+/// show_main_window's doc comment for why these are paired.
+fn hide_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+
+    #[cfg(target_os = "macos")]
+    {
+        match app.set_dock_visibility(false) {
+            Ok(()) => log::info!("Dock icon hidden"),
+            Err(e) => log::warn!("failed to hide Dock icon: {e}"),
+        }
     }
 }
 
@@ -646,10 +674,11 @@ pub fn run() {
             // is the only way to actually exit.
             if let Some(window) = app.get_webview_window("main") {
                 let window_to_hide = window.clone();
+                let handle_for_hide = handle.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = window_to_hide.hide();
+                        hide_main_window(&handle_for_hide, &window_to_hide);
                     }
                 });
             }
