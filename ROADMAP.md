@@ -285,6 +285,50 @@ documented for the next session rather than changed mid-release-cycle.
         (mid-retry-window) with a successful repaint, no manual restart
         needed.
 
+- [x] **Buttons took 4-5 minutes to repaint after waking from a long
+      (~1hr) sleep with the device left plugged in the whole time** —
+      reported 2026-08-16, worse than the earlier unplug/replug bug: here
+      the device never actually disconnected, so `spawn_device_watcher`
+      (fixed above) had nothing to fire on. Root cause: the only thing
+      that re-pushed a snapshot to the device was the usage-poll tick,
+      now deliberately slow (120-300s+, see the 429 item above) — and if
+      the HID connection silently went stale across the sleep/wake cycle
+      (plausible: the OS-level handle surviving suspend in a state that
+      *looks* open but no longer actually is, with no clean disconnect
+      event to notify `DeviceWatcher`), recovery depended entirely on
+      that slow poll cadence happening to notice.
+      **Fix**: `spawn_device_health_check` in `lib.rs` — an independent
+      15s-interval loop, decoupled from the usage-poll interval, that
+      just calls the same push-current-snapshot path on every tick.
+      That path (`apply_snapshot`) already reconnects if it finds no
+      device tracked and clears the tracked device on a failed push, so
+      the health check didn't need its own connect/reconnect branching —
+      an earlier draft of this duplicated that logic before this review
+      caught it and simplified it back down to "just push every tick."
+      Worst case for noticing and recovering from a silently-dead
+      connection this catches that nothing else does: ~30s (two ticks),
+      down from the reported 4-5 minutes. Also set
+      `MissedTickBehavior::Delay` on both this loop and the usage poller,
+      so a long suspend doesn't cause a burst of queued catch-up ticks
+      firing back-to-back the moment the process resumes.
+      **Not empirically verified against the original hour-long-sleep
+      report** — not practically reproducible in a dev session — this is
+      a sound, bounded-worst-case fix by construction, not a
+      confirmed-fixed claim. Flag if it recurs.
+- [x] **Any polling error (not just a real HTTP 401) was triggering a
+      fresh Keychain read** — found during this review, not from a user
+      report. `poll_cached` originally fell through to
+      `read_access_token()` (the Keychain-touching path) on *any*
+      `Err` from a poll attempt, including a rate limit or a plain
+      network blip right after waking from sleep — both totally
+      unrelated to whether the cached token was still valid. Given
+      unsigned ad-hoc builds get a new code signature every rebuild
+      (macOS Keychain's "Always Allow" grant doesn't survive that), any
+      extra unnecessary Keychain read is an extra chance to re-prompt for
+      a password. Added `PollError::Unauthorized` as its own variant
+      (only set on a real HTTP 401) and narrowed the fallback to trigger
+      only on that.
+
 ## Phase 6 — Stretch (post-v1, not committed)
 
 - [ ] Linux packaging.

@@ -24,6 +24,19 @@ const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray/tray-icon@2x.png");
 const STARTUP_CONNECT_ATTEMPTS: u32 = 8;
 const STARTUP_CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How often the independent device-health check runs — see
+/// spawn_device_health_check's doc comment. Deliberately decoupled from
+/// refresh_interval_secs (120-300s+): a user reported buttons staying
+/// blank for 4-5 minutes after a sleep/wake cycle with the device left
+/// plugged in the whole time, which is consistent with device recovery
+/// still being coupled to the slow usage-poll cadence somewhere. This
+/// gives a short, bounded worst-case recovery time regardless of *why*
+/// the connection went stale (missed DeviceWatcher event, a handle that
+/// silently died across sleep/wake without a clean disconnect event,
+/// anything) instead of depending on correctly diagnosing one exact
+/// mechanism.
+const DEVICE_HEALTH_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
 struct ConnectedDevice {
     device: Device,
     kind: device::Kind,
@@ -469,6 +482,24 @@ fn spawn_usage_poller(app: &tauri::AppHandle) {
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
                 }
+                // A *freshly*-read token was still rejected (poll_cached
+                // only reaches this point after already trying that) -
+                // re-reading again next tick won't help, this needs a
+                // real `claude login`. Found in review: without this,
+                // every single tick would keep re-touching Keychain
+                // forever instead of backing off. Doesn't cache anything
+                // bad, just slows the retry pace.
+                Err(usage::PollError::Unauthorized) => {
+                    log::warn!(
+                        "usage endpoint rejected a freshly-read token - likely needs `claude login` again, backing off"
+                    );
+                    let _ = app.emit(
+                        "usage://error",
+                        "Claude Code credentials were rejected - try `claude login` again"
+                            .to_string(),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                }
                 Err(err) => {
                     log::error!("usage poll failed: {err:#}");
                     let _ = app.emit("usage://error", err.to_string());
@@ -568,6 +599,45 @@ fn spawn_device_watcher(app: &tauri::AppHandle) {
             log::warn!("device watch stream ended, restarting in 5s");
             let _ = watch_task.await;
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
+}
+
+/// Independent safety net on top of spawn_device_watcher, running on its
+/// own short cadence (DEVICE_HEALTH_CHECK_INTERVAL) instead of
+/// piggybacking on the usage-poll interval (now 120-300s+, deliberately
+/// slow to avoid the endpoint's rate limit).
+///
+/// Just calls push_now every tick - apply_snapshot (which push_now calls)
+/// *already* does "reconnect if AppState.device is empty, then push,
+/// clear on failure" internally, so there's nothing to hand-roll here.
+/// An earlier version of this duplicated that connect-or-push branching
+/// itself, redundantly.
+///
+/// The reason this exists at all: if the connection dies silently (e.g. a
+/// stale handle surviving a sleep/wake cycle with no clean Disconnected
+/// event from spawn_device_watcher - plausible root cause of a real
+/// report of buttons staying blank for 4-5 minutes after waking with the
+/// device left plugged in the whole time), apply_snapshot's existing
+/// failure handling clears AppState.device, and the *next* tick's
+/// apply_snapshot call reconnects. Worst case for full recovery from a
+/// silently-dead connection that nothing else catches: two ticks, ~30s -
+/// a large improvement over the multi-minute delay that prompted this,
+/// without needing to pin down the exact OS-level mechanism behind it.
+fn spawn_device_health_check(app: &tauri::AppHandle) {
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(DEVICE_HEALTH_CHECK_INTERVAL);
+        // Don't burst-fire a backlog of catch-up ticks after a long sleep
+        // (tokio's default `Burst` behavior) - just resume at normal
+        // pace. This loop only cares about "has it been at least
+        // DEVICE_HEALTH_CHECK_INTERVAL," not making up for lost ticks.
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            interval.tick().await;
+            push_now(&app).await;
         }
     });
 }
@@ -705,6 +775,7 @@ pub fn run() {
 
             spawn_startup_device_connect(&handle);
             spawn_device_watcher(&handle);
+            spawn_device_health_check(&handle);
             spawn_usage_poller(&handle);
 
             Ok(())
@@ -712,8 +783,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // macOS: clicking the Dock icon while the window is hidden
-            // should bring it back, matching normal Mac app behavior.
+            // macOS: relaunching the app while it's already running
+            // (Finder double-click, Launchpad, `open -a`) fires this and
+            // should bring the window back - it's not literally "clicking
+            // the Dock icon" now that the Dock icon itself is hidden
+            // along with the window (see hide_main_window), but
+            // applicationShouldHandleReopen: still fires for those other
+            // relaunch paths regardless of Dock/activation-policy state.
             // RunEvent::Reopen only exists on macOS - this must be cfg'd
             // out on other platforms or the build doesn't even compile
             // (found via a real Windows CI failure, not guessed). Match on
