@@ -37,6 +37,7 @@ interface AppConfig {
   refresh_interval_secs: number;
   buttons: ButtonAssignment[];
   budget: BudgetConfig;
+  launch_at_login: boolean;
 }
 
 // Matches device::SCREEN_KEY_COUNT in the Rust backend. The AKP03-family
