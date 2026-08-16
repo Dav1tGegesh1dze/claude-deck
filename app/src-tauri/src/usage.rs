@@ -17,6 +17,13 @@ const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 #[derive(Debug)]
 pub enum PollError {
     RateLimited { retry_after_secs: Option<u64> },
+    /// The token was actually rejected (HTTP 401) - the only case where
+    /// re-reading the credential store (and possibly re-prompting for
+    /// Keychain access on macOS) is actually warranted. Everything else
+    /// (network blips, other HTTP statuses, a malformed response) should
+    /// just be retried next poll tick with the same cached token, not
+    /// treated as proof the token is bad.
+    Unauthorized,
     Other(anyhow::Error),
 }
 
@@ -29,6 +36,7 @@ impl std::fmt::Display for PollError {
             PollError::RateLimited {
                 retry_after_secs: None,
             } => write!(f, "rate limited by usage endpoint (HTTP 429)"),
+            PollError::Unauthorized => write!(f, "usage endpoint rejected the token (HTTP 401)"),
             PollError::Other(e) => write!(f, "{e:#}"),
         }
     }
@@ -125,6 +133,10 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageS
         return Err(PollError::RateLimited { retry_after_secs });
     }
 
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(PollError::Unauthorized);
+    }
+
     if !status.is_success() {
         return Err(PollError::Other(anyhow!(
             "usage endpoint returned HTTP {status}"
@@ -145,10 +157,18 @@ pub async fn fetch_usage(client: &reqwest::Client, token: &str) -> Result<UsageS
 
 /// Polls usage, reusing a cached token when possible so the OS credential
 /// store (macOS Keychain, which prompts the user) isn't touched on every
-/// single poll tick — only once, plus a re-read if the cached token stops
-/// working (expired/rotated). This was a real problem found during
-/// hardware testing: re-reading Keychain every poll trained the "Always
-/// Allow" grant to never stick, since it kept getting asked again.
+/// single poll tick — only once, plus a re-read if the cached token
+/// actually stops working. This was a real problem found during hardware
+/// testing: re-reading Keychain too often trained the "Always Allow"
+/// grant to never stick, since it kept getting asked again.
+///
+/// Only a confirmed HTTP 401 falls through to a fresh credential-store
+/// read. Everything else (a rate limit, a network blip right after
+/// waking from sleep, some other transient failure) is returned as-is —
+/// the cached token is probably still fine, and the next poll tick will
+/// naturally retry with it. Originally this fell through on *any*
+/// non-429 error, which meant a plain network hiccup could trigger an
+/// unnecessary Keychain re-read (and possible re-prompt).
 pub async fn poll_cached(
     client: &reqwest::Client,
     cached_token: &tokio::sync::Mutex<Option<String>>,
@@ -158,14 +178,11 @@ pub async fn poll_cached(
     if let Some(token) = existing {
         match fetch_usage(client, &token).await {
             Ok(snapshot) => return Ok(snapshot),
-            // Don't mask rate limiting by silently retrying with a fresh
-            // token read - that just wastes a Keychain touch and gets
-            // limited again.
-            Err(err @ PollError::RateLimited { .. }) => return Err(err),
-            Err(PollError::Other(_)) => {
-                // Cached token might be stale/expired/rotated - fall
-                // through to a fresh read from the credential store.
+            Err(PollError::Unauthorized) => {
+                // The token really was rejected - fall through to a
+                // fresh read from the credential store.
             }
+            Err(err) => return Err(err),
         }
     }
 

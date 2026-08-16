@@ -3,9 +3,10 @@
 //!
 //! VID/PID table and protocol details sourced from the reference OpenDeck
 //! plugin (github.com/4ndv/opendeck-akp03), confirmed against mirajazz
-//! 0.16.2's actual API on 2026-08-13. **Not yet verified against real
-//! hardware** — no AKP03E was connected to the dev machine during Phase 1.
-//! Verify before Phase 5 release (see ROADMAP.md Phase 0).
+//! 0.16.2's actual API on 2026-08-13. Verified against a real AKP03E
+//! across several rounds of hardware testing (image push, button events,
+//! unplug/replug) — see ROADMAP.md for the history. Other Kind variants
+//! remain untested (best-effort, per SPEC.md §4).
 
 use anyhow::{anyhow, Result};
 use futures_lite::StreamExt;
@@ -199,7 +200,6 @@ pub async fn push_image(
 
 /// Phase 0/1 hardware spike, wired as a real command: connects to the first
 /// supported device found and pushes a solid-color test image to button 0.
-/// Not yet verified against real hardware (see module doc comment).
 pub async fn push_test_pattern() -> Result<String> {
     let (device, kind) = connect_first().await?;
 
